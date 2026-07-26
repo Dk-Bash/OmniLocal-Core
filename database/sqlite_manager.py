@@ -133,6 +133,18 @@ class SQLiteManager:
             );
         """)
 
+        # 10. Tabla interaction_feedback (Módulo 14)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS interaction_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                interaction_id INTEGER NOT NULL,
+                rating INTEGER NOT NULL,
+                confidence REAL NOT NULL,
+                comment TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -424,6 +436,56 @@ class SQLiteManager:
         cursor.execute(
             "SELECT * FROM user_preferences WHERE user_id = ? ORDER BY id ASC;",
             (user_id,)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Self Evaluation & Feedback (Módulo 14)
+    # ----------------------------------------------------
+    def insert_interaction_feedback(
+        self, interaction_id: int, rating: int, confidence: float, comment: str = "", created_at: Optional[str] = None
+    ) -> int:
+        """Inserta un registro de feedback de interacción en interaction_feedback y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO interaction_feedback (interaction_id, rating, confidence, comment)
+                VALUES (?, ?, ?, ?);
+                """,
+                (interaction_id, rating, confidence, comment)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO interaction_feedback (interaction_id, rating, confidence, comment, created_at)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (interaction_id, rating, confidence, comment, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_interaction_feedback_by_id(self, feedback_id: int) -> Optional[dict]:
+        """Obtiene una evaluación/feedback por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM interaction_feedback WHERE id = ?;",
+            (feedback_id,)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_interaction_feedback_by_interaction(self, interaction_id: int) -> list:
+        """Obtiene todas las evaluaciones asociadas a una interacción."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM interaction_feedback WHERE interaction_id = ? ORDER BY id ASC;",
+            (interaction_id,)
         )
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
