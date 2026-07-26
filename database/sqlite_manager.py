@@ -28,7 +28,7 @@ class SQLiteManager:
         return self.conn
 
     def create_tables(self) -> None:
-        """Crea las tablas obligatorias para OmniLocal-Core."""
+        """Crea las tres tablas iniciales obligatorias para el Módulo 2."""
         if self.conn is None:
             self.connect()
 
@@ -85,6 +85,28 @@ class SQLiteManager:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (source_id) REFERENCES knowledge_nodes (id) ON DELETE CASCADE,
                 FOREIGN KEY (target_id) REFERENCES knowledge_nodes (id) ON DELETE CASCADE
+            );
+        """)
+
+        # 6. Tabla context_sessions (Módulo 10)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS context_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_name TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 7. Tabla context_messages (Módulo 10)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS context_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES context_sessions (id) ON DELETE CASCADE
             );
         """)
 
@@ -182,6 +204,98 @@ class SQLiteManager:
         cursor.execute(
             "SELECT * FROM knowledge_nodes WHERE name LIKE ? OR description LIKE ? OR node_type LIKE ? ORDER BY id ASC;",
             (f"%{query}%", f"%{query}%", f"%{query}%")
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Context Engine (Módulo 10)
+    # ----------------------------------------------------
+    def insert_context_session(self, session_name: str, active: bool = True, created_at: Optional[str] = None) -> int:
+        """Inserta una sesión de contexto en context_sessions y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        active_int = 1 if active else 0
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO context_sessions (session_name, active)
+                VALUES (?, ?);
+                """,
+                (session_name, active_int)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO context_sessions (session_name, active, created_at)
+                VALUES (?, ?, ?);
+                """,
+                (session_name, active_int, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_context_session(self, session_id: int) -> Optional[dict]:
+        """Recupera una sesión de contexto por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM context_sessions WHERE id = ?;", (session_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d['active'] = bool(d['active'])
+        return d
+
+    def update_context_session_active(self, session_id: int, active: bool) -> bool:
+        """Actualiza el estado 'active' de una sesión de contexto."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        active_int = 1 if active else 0
+        cursor.execute(
+            "UPDATE context_sessions SET active = ? WHERE id = ?;",
+            (active_int, session_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def insert_context_message(self, session_id: int, role: str, content: str, created_at: Optional[str] = None) -> int:
+        """Inserta un mensaje de contexto en context_messages y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO context_messages (session_id, role, content)
+                VALUES (?, ?, ?);
+                """,
+                (session_id, role, content)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO context_messages (session_id, role, content, created_at)
+                VALUES (?, ?, ?, ?);
+                """,
+                (session_id, role, content, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_recent_context_messages(self, session_id: int, limit: int = 10) -> list:
+        """Recupera los mensajes más recientes de una sesión en orden cronológico."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM (
+                SELECT * FROM context_messages
+                WHERE session_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+            ) ORDER BY id ASC;
+            """,
+            (session_id, limit)
         )
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
