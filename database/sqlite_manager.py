@@ -548,6 +548,17 @@ class SQLiteManager:
             return float(row[0])
         return 0.0
 
+    # ----------------------------------------------------
+    # Operaciones de Auditoría de Memoria (Módulo 17)
+    # ----------------------------------------------------
+    def get_all_memories_for_audit(self) -> list[dict]:
+        """Recupera todas las memorias registradas para su auditoría de integridad."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM memories ORDER BY id ASC;")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
     def close(self) -> None:
         """Cierra la conexión activa con la base de datos."""
         if self.conn is not None:
