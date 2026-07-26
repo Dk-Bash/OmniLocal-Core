@@ -490,6 +490,43 @@ class SQLiteManager:
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
+    # ----------------------------------------------------
+    # Operaciones de Métricas y Analíticas (Módulo 15)
+    # ----------------------------------------------------
+    def count_memories(self) -> int:
+        """Cuenta el total de registros en la tabla memories."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM memories;")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+    def count_sessions(self) -> int:
+        """Cuenta el total de registros en la tabla context_sessions."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM context_sessions;")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+    def count_interactions(self) -> int:
+        """Cuenta el total de interacciones (memorias episódicas)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM memories WHERE memory_type = 'episodic';")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+    def average_feedback_score(self) -> float:
+        """Calcula el promedio de rating en interaction_feedback. Devuelve 0.0 si no existen registros."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT AVG(rating) FROM interaction_feedback;")
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return float(row[0])
+        return 0.0
+
     def close(self) -> None:
         """Cierra la conexión activa con la base de datos."""
         if self.conn is not None:
