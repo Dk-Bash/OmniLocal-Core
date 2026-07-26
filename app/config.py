@@ -4,6 +4,10 @@ import os
 PROJECT_NAME = "OmniLocal-Core"
 VERSION = "0.1.0"
 
+# Entorno y Logging (Módulo 6)
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
 # Rutas principales del proyecto
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
