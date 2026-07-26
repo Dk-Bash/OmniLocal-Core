@@ -12,3 +12,6 @@ DATABASE_DIR = os.path.join(BASE_DIR, "database")
 MEMORY_DIR = os.path.join(BASE_DIR, "memory")
 DOCS_DIR = os.path.join(BASE_DIR, "docs")
 TESTS_DIR = os.path.join(BASE_DIR, "tests")
+
+# Ruta de la base de datos SQLite
+DATABASE_PATH = os.path.join(DATA_DIR, "omnilocal.db")
