@@ -28,7 +28,7 @@ class SQLiteManager:
         return self.conn
 
     def create_tables(self) -> None:
-        """Crea las tres tablas iniciales obligatorias para el Módulo 2."""
+        """Crea las tablas obligatorias para OmniLocal-Core."""
         if self.conn is None:
             self.connect()
 
@@ -64,7 +64,105 @@ class SQLiteManager:
             );
         """)
 
+        # 4. Tabla knowledge_nodes (Módulo 7)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS knowledge_nodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                node_type TEXT NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 5. Tabla knowledge_relations (Módulo 7)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS knowledge_relations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id INTEGER NOT NULL,
+                target_id INTEGER NOT NULL,
+                relation_type TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (source_id) REFERENCES knowledge_nodes (id) ON DELETE CASCADE,
+                FOREIGN KEY (target_id) REFERENCES knowledge_nodes (id) ON DELETE CASCADE
+            );
+        """)
+
         self.conn.commit()
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Knowledge Layer (Módulo 7)
+    # ----------------------------------------------------
+    def insert_knowledge_node(self, name: str, node_type: str, description: str = "", created_at: Optional[str] = None) -> int:
+        """Inserta un nodo de conocimiento en la tabla knowledge_nodes y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO knowledge_nodes (name, node_type, description)
+                VALUES (?, ?, ?);
+                """,
+                (name, node_type, description)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO knowledge_nodes (name, node_type, description, created_at)
+                VALUES (?, ?, ?, ?);
+                """,
+                (name, node_type, description, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_knowledge_node(self, node_id: int) -> Optional[dict]:
+        """Recupera un nodo de conocimiento por ID devolviendo un diccionario o None."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM knowledge_nodes WHERE id = ?;", (node_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def insert_knowledge_relation(self, source_id: int, target_id: int, relation_type: str, created_at: Optional[str] = None) -> int:
+        """Inserta una relación de conocimiento en la tabla knowledge_relations y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO knowledge_relations (source_id, target_id, relation_type)
+                VALUES (?, ?, ?);
+                """,
+                (source_id, target_id, relation_type)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO knowledge_relations (source_id, target_id, relation_type, created_at)
+                VALUES (?, ?, ?, ?);
+                """,
+                (source_id, target_id, relation_type, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_knowledge_relations(self, node_id: int) -> list:
+        """Recupera todas las relaciones asociadas a un nodo (source o target)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM knowledge_relations
+            WHERE source_id = ? OR target_id = ?
+            ORDER BY id ASC;
+            """,
+            (node_id, node_id)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
 
     def close(self) -> None:
         """Cierra la conexión activa con la base de datos."""
