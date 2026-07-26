@@ -145,6 +145,18 @@ class SQLiteManager:
             );
         """)
 
+        # 11. Tabla maintenance_audit_events (Módulo 23)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                source_layer TEXT NOT NULL,
+                description TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -556,6 +568,53 @@ class SQLiteManager:
         conn = self.connect()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM memories ORDER BY id ASC;")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones de Auditoría de Mantenimiento (Módulo 23)
+    # ----------------------------------------------------
+    def insert_audit_event(
+        self, event_type: str, source_layer: str, description: str, status: str, created_at: Optional[str] = None
+    ) -> int:
+        """Inserta un evento de auditoría de mantenimiento y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_audit_events (event_type, source_layer, description, status)
+                VALUES (?, ?, ?, ?);
+                """,
+                (event_type, source_layer, description, status)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_audit_events (event_type, source_layer, description, status, created_at)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (event_type, source_layer, description, status, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_audit_event(self, event_id: int) -> Optional[dict]:
+        """Obtiene un evento de auditoría por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM maintenance_audit_events WHERE id = ?;",
+            (event_id,)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_all_audit_events(self) -> list[dict]:
+        """Obtiene todos los eventos de auditoría ordenados cronológicamente (id ASC)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM maintenance_audit_events ORDER BY id ASC;")
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
