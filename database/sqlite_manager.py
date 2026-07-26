@@ -686,6 +686,60 @@ class SQLiteManager:
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
+    def get_all_outcome_evaluations(self) -> list[dict]:
+        """Obtiene todas las evaluaciones de resultado ordenadas cronológicamente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM maintenance_outcome_evaluations ORDER BY id ASC;")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Consultas analíticas para Maintenance Intelligence Layer (Módulo 25)
+    # ----------------------------------------------------
+    def count_outcome_events(self) -> int:
+        """Cuenta el número total de evaluaciones de resultado registradas."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM maintenance_outcome_evaluations;")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+    def count_outcomes_by_type(self) -> dict:
+        """Devuelve el conteo de evaluaciones agrupado por result_type."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT result_type, COUNT(*) FROM maintenance_outcome_evaluations GROUP BY result_type;"
+        )
+        rows = cursor.fetchall()
+        result = {}
+        for r_type, count in rows:
+            if r_type:
+                result[r_type] = count
+        return result
+
+    def average_outcome_score(self) -> float:
+        """Calcula el promedio del score de las evaluaciones de resultado."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT AVG(score) FROM maintenance_outcome_evaluations;")
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return round(float(row[0]), 4)
+        return 0.0
+
+    def get_outcome_distribution(self) -> dict:
+        """Obtiene la distribución general de los resultados de mantenimiento."""
+        total = self.count_outcome_events()
+        by_type = self.count_outcomes_by_type()
+        avg_score = self.average_outcome_score()
+        return {
+            "total_events": total,
+            "by_type": by_type,
+            "average_score": avg_score,
+        }
+
     def close(self) -> None:
         """Cierra la conexión activa con la base de datos."""
         if self.conn is not None:
