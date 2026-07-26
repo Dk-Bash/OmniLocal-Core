@@ -4,7 +4,6 @@ import sys
 # Asegurar que el directorio raíz del proyecto esté en el path de importación
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.config import PROJECT_NAME, VERSION
 from app.core.engine import OmniLocalEngine
 
 
