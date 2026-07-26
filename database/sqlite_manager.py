@@ -157,6 +157,19 @@ class SQLiteManager:
             );
         """)
 
+        # 12. Tabla maintenance_outcome_evaluations (Módulo 24)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_outcome_evaluations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER NOT NULL,
+                result_type TEXT NOT NULL,
+                score REAL NOT NULL,
+                summary TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (event_id) REFERENCES maintenance_audit_events(id) ON DELETE CASCADE
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -615,6 +628,61 @@ class SQLiteManager:
         conn = self.connect()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM maintenance_audit_events ORDER BY id ASC;")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Maintenance Outcome Evaluation Layer (Módulo 24)
+    # ----------------------------------------------------
+    def insert_outcome_evaluation(
+        self,
+        event_id: int,
+        result_type: str,
+        score: float,
+        summary: str,
+        created_at: Optional[str] = None
+    ) -> int:
+        """Inserta una evaluación de resultado de mantenimiento y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_outcome_evaluations (event_id, result_type, score, summary)
+                VALUES (?, ?, ?, ?);
+                """,
+                (event_id, result_type, score, summary)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_outcome_evaluations (event_id, result_type, score, summary, created_at)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (event_id, result_type, score, summary, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_outcome_evaluation(self, evaluation_id: int) -> Optional[dict]:
+        """Obtiene una evaluación de resultado por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM maintenance_outcome_evaluations WHERE id = ?;",
+            (evaluation_id,)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_outcomes_by_event(self, event_id: int) -> list[dict]:
+        """Obtiene todas las evaluaciones asociadas a un evento de auditoría específico."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM maintenance_outcome_evaluations WHERE event_id = ? ORDER BY id ASC;",
+            (event_id,)
+        )
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
 

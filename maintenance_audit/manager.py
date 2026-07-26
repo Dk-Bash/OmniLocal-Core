@@ -70,3 +70,28 @@ class AuditManager:
                 )
             )
         return events
+
+    def get_event_by_id(self, event_id: int) -> Optional[AuditEvent]:
+        """Obtiene un evento de auditoría por su ID."""
+        row = self.db_manager.get_audit_event(event_id)
+        if not row:
+            return None
+        created_at_val = row.get("created_at")
+        if isinstance(created_at_val, str):
+            try:
+                dt = datetime.fromisoformat(created_at_val.replace(" ", "T"))
+            except ValueError:
+                dt = datetime.now()
+        elif isinstance(created_at_val, datetime):
+            dt = created_at_val
+        else:
+            dt = datetime.now()
+
+        return AuditEvent(
+            id=row["id"],
+            event_type=row["event_type"],
+            source_layer=row["source_layer"],
+            description=row["description"],
+            status=row["status"],
+            created_at=dt,
+        )
