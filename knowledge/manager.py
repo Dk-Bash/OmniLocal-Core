@@ -84,3 +84,11 @@ class KnowledgeManager:
         """
         rows = self.db_manager.get_knowledge_relations(node_id)
         return [KnowledgeRelation(**row_dict) for row_dict in rows]
+
+    def search_nodes(self, query: str) -> List[KnowledgeNode]:
+        """
+        Busca nodos de conocimiento por nombre, tipo o descripción (LIKE).
+        Delegando la consulta SQL a SQLiteManager.
+        """
+        rows = self.db_manager.search_knowledge_nodes(query)
+        return [KnowledgeNode(**row_dict) for row_dict in rows]

@@ -90,3 +90,11 @@ class MemoryManager:
         cursor.execute("DELETE FROM memories WHERE id = ?;", (memory_id,))
         conn.commit()
         return cursor.rowcount > 0
+
+    def search_memories(self, query: str) -> List[Memory]:
+        """
+        Busca recuerdos que contengan el texto de la consulta (LIKE).
+        Delegando la consulta SQL a SQLiteManager.
+        """
+        rows = self.db_manager.search_memories(query)
+        return [Memory(**row_dict) for row_dict in rows]

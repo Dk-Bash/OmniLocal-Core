@@ -164,6 +164,28 @@ class SQLiteManager:
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
+    def search_memories(self, query: str) -> list:
+        """Busca recuerdos cuyo contenido coincida con la consulta (LIKE)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM memories WHERE content LIKE ? ORDER BY id ASC;",
+            (f"%{query}%",)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def search_knowledge_nodes(self, query: str) -> list:
+        """Busca nodos de conocimiento cuyo nombre, descripción o tipo coincidan con la consulta (LIKE)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM knowledge_nodes WHERE name LIKE ? OR description LIKE ? OR node_type LIKE ? ORDER BY id ASC;",
+            (f"%{query}%", f"%{query}%", f"%{query}%")
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
     def close(self) -> None:
         """Cierra la conexión activa con la base de datos."""
         if self.conn is not None:
