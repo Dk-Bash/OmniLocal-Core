@@ -2,8 +2,11 @@ from typing import List, Optional
 from app.config import PROJECT_NAME, VERSION
 from app.logger import get_logger
 from database.sqlite_manager import SQLiteManager
+from knowledge.manager import KnowledgeManager
 from memory.manager import MemoryManager
 from memory.models import Memory
+from retrieval.engine import RetrievalEngine
+from retrieval.models import RetrievalResult
 
 logger = get_logger(__name__)
 
@@ -11,9 +14,9 @@ logger = get_logger(__name__)
 class OmniLocalEngine:
     """
     Clase núcleo para OmniLocal-Core.
-    Coordina la inicialización, el estado del motor y delega las operaciones de memoria
-    a través de MemoryManager y SQLiteManager sin escribir SQL directamente.
-    Incluye logging estructurado y manejo controlled de errores.
+    Coordina la inicialización, el estado del motor y delega las operaciones de memoria,
+    conocimiento y búsqueda a través de sus respectivos gestores sin escribir SQL directamente.
+    Incluye logging estructurado y manejo controlado de errores.
     """
 
     def __init__(self, db_manager: Optional[SQLiteManager] = None):
@@ -31,7 +34,12 @@ class OmniLocalEngine:
                 self.db_manager = db_manager
 
             self.memory_manager = MemoryManager(db_manager=self.db_manager)
-            logger.info("OmniLocalEngine e componentes de memoria inicializados con éxito.")
+            self.knowledge_manager = KnowledgeManager(db_manager=self.db_manager)
+            self.retrieval_engine = RetrievalEngine(
+                memory_manager=self.memory_manager,
+                knowledge_manager=self.knowledge_manager
+            )
+            logger.info("OmniLocalEngine, componentes de memoria, conocimiento y búsqueda inicializados con éxito.")
         except Exception as e:
             logger.error(f"Error al inicializar OmniLocalEngine: {e}", exc_info=True)
             raise e
@@ -112,3 +120,37 @@ class OmniLocalEngine:
         except Exception as e:
             logger.error(f"Error al listar recuerdos: {e}", exc_info=True)
             return []
+
+    def search(self, query: str) -> List[RetrievalResult]:
+        """
+        Delega la búsqueda combinada (memoria y conocimiento) a RetrievalEngine.
+        """
+        try:
+            logger.info(f"Búsqueda combinada en motor con la consulta: '{query}'")
+            return self.retrieval_engine.search(query)
+        except Exception as e:
+            logger.error(f"Error en la búsqueda combinada para '{query}': {e}", exc_info=True)
+            return []
+
+    def search_memory(self, query: str) -> List[RetrievalResult]:
+        """
+        Delega la búsqueda en la capa de memoria a RetrievalEngine.
+        """
+        try:
+            logger.info(f"Búsqueda en memoria con la consulta: '{query}'")
+            return self.retrieval_engine.search_memory(query)
+        except Exception as e:
+            logger.error(f"Error en búsqueda de memoria para '{query}': {e}", exc_info=True)
+            return []
+
+    def search_knowledge(self, query: str) -> List[RetrievalResult]:
+        """
+        Delega la búsqueda en la capa de conocimiento a RetrievalEngine.
+        """
+        try:
+            logger.info(f"Búsqueda en conocimiento con la consulta: '{query}'")
+            return self.retrieval_engine.search_knowledge(query)
+        except Exception as e:
+            logger.error(f"Error en búsqueda de conocimiento para '{query}': {e}", exc_info=True)
+            return []
+
