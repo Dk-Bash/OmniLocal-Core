@@ -110,6 +110,29 @@ class SQLiteManager:
             );
         """)
 
+        # 8. Tabla user_profiles (Módulo 11)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                language TEXT NOT NULL DEFAULT 'es',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 9. Tabla user_preferences (Módulo 11)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES user_profiles (id) ON DELETE CASCADE
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -296,6 +319,111 @@ class SQLiteManager:
             ) ORDER BY id ASC;
             """,
             (session_id, limit)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para User Profile & Preferences (Módulo 11)
+    # ----------------------------------------------------
+    def insert_user_profile(self, username: str, display_name: str, language: str = "es", created_at: Optional[str] = None) -> int:
+        """Inserta un perfil de usuario en user_profiles y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO user_profiles (username, display_name, language)
+                VALUES (?, ?, ?);
+                """,
+                (username, display_name, language)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO user_profiles (username, display_name, language, created_at)
+                VALUES (?, ?, ?, ?);
+                """,
+                (username, display_name, language, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_user_profile(self, user_id: int) -> Optional[dict]:
+        """Obtiene un perfil de usuario por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM user_profiles WHERE id = ?;",
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def update_user_profile(self, user_id: int, display_name: Optional[str] = None, language: Optional[str] = None) -> bool:
+        """Actualiza la información visible (nombre visible, idioma) de un usuario."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        updates = []
+        params = []
+        if display_name is not None:
+            updates.append("display_name = ?")
+            params.append(display_name)
+        if language is not None:
+            updates.append("language = ?")
+            params.append(language)
+        if not updates:
+            return False
+        params.append(user_id)
+        query = f"UPDATE user_profiles SET {', '.join(updates)} WHERE id = ?;"
+        cursor.execute(query, tuple(params))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def set_user_preference(self, user_id: int, key: str, value: str, created_at: Optional[str] = None) -> int:
+        """Guarda o actualiza una preferencia para un usuario."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id FROM user_preferences WHERE user_id = ? AND key = ?;",
+            (user_id, key)
+        )
+        existing = cursor.fetchone()
+        if existing:
+            pref_id = existing["id"]
+            cursor.execute(
+                "UPDATE user_preferences SET value = ? WHERE id = ?;",
+                (value, pref_id)
+            )
+            conn.commit()
+            return pref_id
+        else:
+            if created_at is None:
+                cursor.execute(
+                    """
+                    INSERT INTO user_preferences (user_id, key, value)
+                    VALUES (?, ?, ?);
+                    """,
+                    (user_id, key, value)
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO user_preferences (user_id, key, value, created_at)
+                    VALUES (?, ?, ?, ?);
+                    """,
+                    (user_id, key, value, created_at)
+                )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_user_preferences(self, user_id: int) -> list:
+        """Obtiene todas las preferencias de un usuario."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM user_preferences WHERE user_id = ? ORDER BY id ASC;",
+            (user_id,)
         )
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
