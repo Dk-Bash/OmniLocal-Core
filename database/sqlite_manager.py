@@ -527,6 +527,27 @@ class SQLiteManager:
             return float(row[0])
         return 0.0
 
+    # ----------------------------------------------------
+    # Operaciones de Consolidación de Memoria (Módulo 16)
+    # ----------------------------------------------------
+    def count_memory_types(self) -> dict:
+        """Devuelve un diccionario con la cantidad de memorias por tipo {memory_type: count}."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT memory_type, COUNT(*) FROM memories GROUP BY memory_type;")
+        rows = cursor.fetchall()
+        return {row[0]: row[1] for row in rows} if rows else {}
+
+    def get_average_memory_importance(self) -> float:
+        """Calcula el promedio del campo importance para todas las memorias. Devuelve 0.0 si no hay registros."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT AVG(importance) FROM memories;")
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return float(row[0])
+        return 0.0
+
     def close(self) -> None:
         """Cierra la conexión activa con la base de datos."""
         if self.conn is not None:
