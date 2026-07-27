@@ -1,6 +1,6 @@
 import os
 import sqlite3
-from typing import Optional
+from typing import Optional, Any
 from app.config import DATABASE_PATH
 
 
@@ -167,6 +167,19 @@ class SQLiteManager:
                 summary TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (event_id) REFERENCES maintenance_audit_events(id) ON DELETE CASCADE
+            );
+        """)
+
+        # 13. Tabla strategy_evaluations (Módulo 27)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS strategy_evaluations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                strategy_id TEXT NOT NULL,
+                quality_score REAL NOT NULL,
+                impact_score REAL NOT NULL,
+                confidence_score REAL NOT NULL,
+                summary TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
 
@@ -739,6 +752,106 @@ class SQLiteManager:
             "by_type": by_type,
             "average_score": avg_score,
         }
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Strategy Evaluation Layer (Módulo 27)
+    # ----------------------------------------------------
+    def insert_strategy_evaluation(
+        self,
+        strategy_id: Any,
+        quality_score: float = 0.0,
+        impact_score: float = 0.0,
+        confidence_score: float = 0.0,
+        summary: str = "",
+        created_at: Optional[str] = None
+    ) -> int:
+        """Inserta una evaluación de estrategia en strategy_evaluations y devuelve el ID generado."""
+        if isinstance(strategy_id, dict):
+            data = strategy_id
+            s_id = data.get("strategy_id", "strategy_001")
+            q_score = data.get("quality_score", 0.0)
+            i_score = data.get("impact_score", 0.0)
+            c_score = data.get("confidence_score", 0.0)
+            sum_text = data.get("summary", "")
+            c_at = data.get("created_at")
+        else:
+            s_id = strategy_id
+            q_score = quality_score
+            i_score = impact_score
+            c_score = confidence_score
+            sum_text = summary
+            c_at = created_at
+
+        conn = self.connect()
+        cursor = conn.cursor()
+        if c_at:
+            cursor.execute(
+                """
+                INSERT INTO strategy_evaluations (strategy_id, quality_score, impact_score, confidence_score, summary, created_at)
+                VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (str(s_id), float(q_score), float(i_score), float(c_score), str(sum_text), str(c_at))
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO strategy_evaluations (strategy_id, quality_score, impact_score, confidence_score, summary)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (str(s_id), float(q_score), float(i_score), float(c_score), str(sum_text))
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_strategy_evaluation(self, eval_id: int) -> Optional[dict]:
+        """Obtiene una evaluación de estrategia por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, strategy_id, quality_score, impact_score, confidence_score, summary, created_at FROM strategy_evaluations WHERE id = ?;",
+            (eval_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "strategy_id": row["strategy_id"],
+                "quality_score": row["quality_score"],
+                "impact_score": row["impact_score"],
+                "confidence_score": row["confidence_score"],
+                "summary": row["summary"],
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_strategy_evaluations(self) -> list:
+        """Obtiene todas las evaluaciones de estrategia ordenadas por id descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, strategy_id, quality_score, impact_score, confidence_score, summary, created_at FROM strategy_evaluations ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "strategy_id": row["strategy_id"],
+                "quality_score": row["quality_score"],
+                "impact_score": row["impact_score"],
+                "confidence_score": row["confidence_score"],
+                "summary": row["summary"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    def count_strategy_evaluations(self) -> int:
+        """Cuenta el total de evaluaciones registradas."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM strategy_evaluations;")
+        row = cursor.fetchone()
+        return row[0] if row else 0
 
     def close(self) -> None:
         """Cierra la conexión activa con la base de datos."""
