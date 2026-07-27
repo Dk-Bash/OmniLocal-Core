@@ -853,6 +853,52 @@ class SQLiteManager:
         row = cursor.fetchone()
         return row[0] if row else 0
 
+    def average_strategy_quality(self) -> float:
+        """Calcula el promedio de quality_score de las evaluaciones estratégicas."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT AVG(quality_score) FROM strategy_evaluations;")
+        row = cursor.fetchone()
+        return round(float(row[0]), 4) if (row and row[0] is not None) else 0.0
+
+    def average_strategy_impact(self) -> float:
+        """Calcula el promedio de impact_score de las evaluaciones estratégicas."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT AVG(impact_score) FROM strategy_evaluations;")
+        row = cursor.fetchone()
+        return round(float(row[0]), 4) if (row and row[0] is not None) else 0.0
+
+    def average_strategy_confidence(self) -> float:
+        """Calcula el promedio de confidence_score de las evaluaciones estratégicas."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT AVG(confidence_score) FROM strategy_evaluations;")
+        row = cursor.fetchone()
+        return round(float(row[0]), 4) if (row and row[0] is not None) else 0.0
+
+    def get_best_strategy_type(self) -> Optional[str]:
+        """Obtiene el tipo o identificador de estrategia con la mayor puntuación de calidad (quality_score)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT strategy_id FROM strategy_evaluations ORDER BY quality_score DESC, id DESC LIMIT 1;"
+        )
+        row = cursor.fetchone()
+        if row and row["strategy_id"]:
+            s_id = str(row["strategy_id"])
+            s_lower = s_id.lower()
+            if "immediate" in s_lower:
+                return "immediate"
+            elif "soon" in s_lower:
+                return "soon"
+            elif "planned" in s_lower:
+                return "planned"
+            elif "deferred" in s_lower:
+                return "deferred"
+            return s_id
+        return None
+
     def close(self) -> None:
         """Cierra la conexión activa con la base de datos."""
         if self.conn is not None:
