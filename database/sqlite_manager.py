@@ -183,6 +183,19 @@ class SQLiteManager:
             );
         """)
 
+        # 14. Tabla adaptive_recommendations (Módulo 29)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS adaptive_recommendations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                strategy_type TEXT NOT NULL,
+                recommended_action TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                reason TEXT NOT NULL,
+                based_on_history INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -898,6 +911,105 @@ class SQLiteManager:
                 return "deferred"
             return s_id
         return None
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Adaptive Recommendation Layer (Módulo 29)
+    # ----------------------------------------------------
+    def insert_adaptive_recommendation(
+        self,
+        strategy_type: Any,
+        recommended_action: Optional[str] = None,
+        confidence: Optional[float] = None,
+        reason: Optional[str] = None,
+        based_on_history: Optional[bool] = None,
+        created_at: Optional[Any] = None,
+    ) -> int:
+        """Inserta una recomendación adaptativa en la tabla adaptive_recommendations."""
+        if hasattr(strategy_type, "strategy_type"):
+            rec = strategy_type
+            s_type = str(rec.strategy_type)
+            r_act = str(rec.recommended_action)
+            conf = float(rec.confidence)
+            reas = str(rec.reason)
+            b_hist = 1 if rec.based_on_history else 0
+            c_at = rec.created_at.isoformat() if hasattr(rec.created_at, "isoformat") else str(rec.created_at)
+        elif isinstance(strategy_type, dict):
+            s_type = str(strategy_type.get("strategy_type", "unknown"))
+            r_act = str(strategy_type.get("recommended_action", ""))
+            conf = float(strategy_type.get("confidence", 0.0))
+            reas = str(strategy_type.get("reason", ""))
+            b_hist = 1 if strategy_type.get("based_on_history") else 0
+            c_at = str(strategy_type.get("created_at")) if strategy_type.get("created_at") else None
+        else:
+            s_type = str(strategy_type)
+            r_act = str(recommended_action or "")
+            conf = float(confidence or 0.0)
+            reas = str(reason or "")
+            b_hist = 1 if based_on_history else 0
+            c_at = str(created_at) if created_at else None
+
+        conn = self.connect()
+        cursor = conn.cursor()
+        if c_at is None:
+            cursor.execute(
+                """
+                INSERT INTO adaptive_recommendations (strategy_type, recommended_action, confidence, reason, based_on_history)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (s_type, r_act, conf, reas, b_hist)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO adaptive_recommendations (strategy_type, recommended_action, confidence, reason, based_on_history, created_at)
+                VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (s_type, r_act, conf, reas, b_hist, c_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_adaptive_recommendation(self, rec_id: int) -> Optional[dict]:
+        """Obtiene una recomendación adaptativa por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, strategy_type, recommended_action, confidence, reason, based_on_history, created_at FROM adaptive_recommendations WHERE id = ?;",
+            (rec_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "strategy_type": row["strategy_type"],
+                "recommended_action": row["recommended_action"],
+                "confidence": row["confidence"],
+                "reason": row["reason"],
+                "based_on_history": bool(row["based_on_history"]),
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_adaptive_recommendations(self) -> list:
+        """Obtiene todas las recomendaciones adaptativas ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, strategy_type, recommended_action, confidence, reason, based_on_history, created_at FROM adaptive_recommendations ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "strategy_type": row["strategy_type"],
+                "recommended_action": row["recommended_action"],
+                "confidence": row["confidence"],
+                "reason": row["reason"],
+                "based_on_history": bool(row["based_on_history"]),
+                "created_at": str(row["created_at"]),
+            })
+        return result
 
     def close(self) -> None:
         """Cierra la conexión activa con la base de datos."""
