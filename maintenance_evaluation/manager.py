@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional, List
 from maintenance_audit.manager import AuditManager
+from database.sqlite_manager import SQLiteManager
 from .models import OutcomeEvaluation
 
 
@@ -11,9 +12,20 @@ class OutcomeEvaluationManager:
     NO ejecuta cambios, NO modifica memorias y NO elimina información.
     """
 
-    def __init__(self, audit_manager: Optional[AuditManager] = None):
-        self.audit_manager = audit_manager or AuditManager()
-        self.db_manager = self.audit_manager.db_manager
+    def __init__(
+        self,
+        audit_manager: Optional[AuditManager] = None,
+        db_manager: Optional[SQLiteManager] = None,
+    ):
+        if audit_manager:
+            self.audit_manager = audit_manager
+            self.db_manager = self.audit_manager.db_manager
+        elif db_manager:
+            self.db_manager = db_manager
+            self.audit_manager = AuditManager(db_manager=db_manager)
+        else:
+            self.audit_manager = AuditManager()
+            self.db_manager = self.audit_manager.db_manager
 
     def evaluate_event(self, event_id: int) -> OutcomeEvaluation:
         """

@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional
 from maintenance_evaluation.manager import OutcomeEvaluationManager
+from database.sqlite_manager import SQLiteManager
 from .models import MaintenanceIntelligenceReport
 
 
@@ -14,9 +15,17 @@ class MaintenanceIntelligenceManager:
     def __init__(
         self,
         eval_manager: Optional[OutcomeEvaluationManager] = None,
+        db_manager: Optional[SQLiteManager] = None,
     ):
-        self.eval_manager = eval_manager or OutcomeEvaluationManager()
-        self.db_manager = self.eval_manager.db_manager
+        if eval_manager:
+            self.eval_manager = eval_manager
+            self.db_manager = self.eval_manager.db_manager
+        elif db_manager:
+            self.db_manager = db_manager
+            self.eval_manager = OutcomeEvaluationManager(db_manager=db_manager)
+        else:
+            self.eval_manager = OutcomeEvaluationManager()
+            self.db_manager = self.eval_manager.db_manager
 
     def generate_report(self) -> MaintenanceIntelligenceReport:
         """

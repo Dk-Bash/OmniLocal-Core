@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import json
 from typing import Optional, Any
 from app.config import DATABASE_PATH
 
@@ -192,6 +193,19 @@ class SQLiteManager:
                 confidence REAL NOT NULL,
                 reason TEXT NOT NULL,
                 based_on_history INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 15. Tabla maintenance_decisions (Módulo 30)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_decisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                decision_type TEXT NOT NULL,
+                selected_strategy TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                reasoning TEXT NOT NULL,
+                supporting_factors TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
@@ -1007,6 +1021,116 @@ class SQLiteManager:
                 "confidence": row["confidence"],
                 "reason": row["reason"],
                 "based_on_history": bool(row["based_on_history"]),
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Maintenance Decision Intelligence Layer (Módulo 30)
+    # ----------------------------------------------------
+    def insert_maintenance_decision(
+        self,
+        decision_type: Any,
+        selected_strategy: Optional[str] = None,
+        confidence: Optional[float] = None,
+        reasoning: Optional[str] = None,
+        supporting_factors: Optional[Any] = None,
+        created_at: Optional[Any] = None,
+    ) -> int:
+        """Inserta una decisión de mantenimiento en la tabla maintenance_decisions."""
+        if hasattr(decision_type, "decision_type"):
+            dec = decision_type
+            d_type = str(dec.decision_type)
+            s_strat = str(dec.selected_strategy)
+            conf = float(dec.confidence)
+            reas = str(dec.reasoning)
+            s_fact = json.dumps(dec.supporting_factors) if isinstance(dec.supporting_factors, list) else str(dec.supporting_factors or "[]")
+            c_at = dec.created_at.isoformat() if hasattr(dec.created_at, "isoformat") else str(dec.created_at)
+        elif isinstance(decision_type, dict):
+            d_type = str(decision_type.get("decision_type", "default"))
+            s_strat = str(decision_type.get("selected_strategy", "unknown"))
+            conf = float(decision_type.get("confidence", 0.0))
+            reas = str(decision_type.get("reasoning", ""))
+            raw_factors = decision_type.get("supporting_factors", [])
+            s_fact = json.dumps(raw_factors) if isinstance(raw_factors, list) else str(raw_factors or "[]")
+            c_at = str(decision_type.get("created_at")) if decision_type.get("created_at") else None
+        else:
+            d_type = str(decision_type)
+            s_strat = str(selected_strategy or "unknown")
+            conf = float(confidence or 0.0)
+            reas = str(reasoning or "")
+            s_fact = json.dumps(supporting_factors) if isinstance(supporting_factors, list) else str(supporting_factors or "[]")
+            c_at = str(created_at) if created_at else None
+
+        conn = self.connect()
+        cursor = conn.cursor()
+        if c_at is None:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_decisions (decision_type, selected_strategy, confidence, reasoning, supporting_factors)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (d_type, s_strat, conf, reas, s_fact)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_decisions (decision_type, selected_strategy, confidence, reasoning, supporting_factors, created_at)
+                VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (d_type, s_strat, conf, reas, s_fact, c_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_maintenance_decision(self, dec_id: int) -> Optional[dict]:
+        """Obtiene una decisión de mantenimiento por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, decision_type, selected_strategy, confidence, reasoning, supporting_factors, created_at FROM maintenance_decisions WHERE id = ?;",
+            (dec_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            raw_factors = row["supporting_factors"]
+            try:
+                factors_list = json.loads(raw_factors) if raw_factors else []
+            except Exception:
+                factors_list = [raw_factors] if raw_factors else []
+            return {
+                "id": row["id"],
+                "decision_type": row["decision_type"],
+                "selected_strategy": row["selected_strategy"],
+                "confidence": row["confidence"],
+                "reasoning": row["reasoning"],
+                "supporting_factors": factors_list,
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_maintenance_decisions(self) -> list:
+        """Obtiene todas las decisiones de mantenimiento ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, decision_type, selected_strategy, confidence, reasoning, supporting_factors, created_at FROM maintenance_decisions ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            raw_factors = row["supporting_factors"]
+            try:
+                factors_list = json.loads(raw_factors) if raw_factors else []
+            except Exception:
+                factors_list = [raw_factors] if raw_factors else []
+            result.append({
+                "id": row["id"],
+                "decision_type": row["decision_type"],
+                "selected_strategy": row["selected_strategy"],
+                "confidence": row["confidence"],
+                "reasoning": row["reasoning"],
+                "supporting_factors": factors_list,
                 "created_at": str(row["created_at"]),
             })
         return result
