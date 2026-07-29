@@ -225,6 +225,19 @@ class SQLiteManager:
             );
         """)
 
+        # 17. Tabla execution_validation_reports (Módulo 32)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS execution_validation_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                plan_id INTEGER NOT NULL,
+                valid INTEGER NOT NULL,
+                risk_level TEXT NOT NULL,
+                issues TEXT NOT NULL,
+                recommendation TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -1268,6 +1281,116 @@ class SQLiteManager:
                 "estimated_duration": row["estimated_duration"],
                 "requires_approval": bool(row["requires_approval"]),
                 "reasoning": row["reasoning"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Execution Validation Reports (Módulo 32)
+    # ----------------------------------------------------
+    def insert_validation_report(
+        self,
+        report: Any = None,
+        plan_id: Optional[int] = None,
+        valid: Optional[bool] = None,
+        risk_level: Optional[str] = None,
+        issues: Optional[Any] = None,
+        recommendation: Optional[str] = None,
+        created_at: Optional[Any] = None,
+    ) -> int:
+        """Inserta un reporte de validación de ejecución en la tabla execution_validation_reports."""
+        if hasattr(report, "plan_id"):
+            p_id = int(report.plan_id)
+            v_val = 1 if report.valid else 0
+            r_level = str(report.risk_level)
+            iss = json.dumps(report.issues) if isinstance(report.issues, list) else str(report.issues or "[]")
+            recom = str(report.recommendation)
+            c_at = report.created_at.isoformat() if hasattr(report.created_at, "isoformat") else str(report.created_at)
+        elif isinstance(report, dict):
+            p_id = int(report.get("plan_id", 0))
+            v_val = 1 if report.get("valid") else 0
+            r_level = str(report.get("risk_level", "low"))
+            raw_issues = report.get("issues", [])
+            iss = json.dumps(raw_issues) if isinstance(raw_issues, list) else str(raw_issues or "[]")
+            recom = str(report.get("recommendation", ""))
+            c_at = str(report.get("created_at")) if report.get("created_at") else None
+        else:
+            p_id = int(plan_id or 0)
+            v_val = 1 if valid else 0
+            r_level = str(risk_level or "low")
+            iss = json.dumps(issues) if isinstance(issues, list) else str(issues or "[]")
+            recom = str(recommendation or "")
+            c_at = str(created_at) if created_at else None
+
+        conn = self.connect()
+        cursor = conn.cursor()
+        if c_at is None:
+            cursor.execute(
+                """
+                INSERT INTO execution_validation_reports (plan_id, valid, risk_level, issues, recommendation)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (p_id, v_val, r_level, iss, recom)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO execution_validation_reports (plan_id, valid, risk_level, issues, recommendation, created_at)
+                VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (p_id, v_val, r_level, iss, recom, c_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_validation_report(self, report_id: int) -> Optional[dict]:
+        """Obtiene un reporte de validación por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, plan_id, valid, risk_level, issues, recommendation, created_at FROM execution_validation_reports WHERE id = ?;",
+            (report_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            raw_issues = row["issues"]
+            try:
+                issues_list = json.loads(raw_issues) if raw_issues else []
+            except Exception:
+                issues_list = [raw_issues] if raw_issues else []
+            return {
+                "id": row["id"],
+                "plan_id": row["plan_id"],
+                "valid": bool(row["valid"]),
+                "risk_level": row["risk_level"],
+                "issues": issues_list,
+                "recommendation": row["recommendation"],
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_validation_reports(self) -> list:
+        """Obtiene todos los reportes de validación ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, plan_id, valid, risk_level, issues, recommendation, created_at FROM execution_validation_reports ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            raw_issues = row["issues"]
+            try:
+                issues_list = json.loads(raw_issues) if raw_issues else []
+            except Exception:
+                issues_list = [raw_issues] if raw_issues else []
+            result.append({
+                "id": row["id"],
+                "plan_id": row["plan_id"],
+                "valid": bool(row["valid"]),
+                "risk_level": row["risk_level"],
+                "issues": issues_list,
+                "recommendation": row["recommendation"],
                 "created_at": str(row["created_at"]),
             })
         return result
