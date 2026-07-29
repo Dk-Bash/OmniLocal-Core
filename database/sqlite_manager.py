@@ -238,6 +238,19 @@ class SQLiteManager:
             );
         """)
 
+        # 18. Tabla execution_approvals (Módulo 33)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS execution_approvals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                plan_id INTEGER NOT NULL,
+                validation_id INTEGER NOT NULL,
+                approval_status TEXT NOT NULL,
+                approved INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -1072,22 +1085,26 @@ class SQLiteManager:
             s_strat = str(dec.selected_strategy)
             conf = float(dec.confidence)
             reas = str(dec.reasoning)
-            s_fact = json.dumps(dec.supporting_factors) if isinstance(dec.supporting_factors, list) else str(dec.supporting_factors or "[]")
+            s_fact = json.dumps(dec.supporting_factors or [])
             c_at = dec.created_at.isoformat() if hasattr(dec.created_at, "isoformat") else str(dec.created_at)
         elif isinstance(decision_type, dict):
-            d_type = str(decision_type.get("decision_type", "default"))
-            s_strat = str(decision_type.get("selected_strategy", "unknown"))
+            d_type = str(decision_type.get("decision_type", "unknown"))
+            s_strat = str(decision_type.get("selected_strategy", ""))
             conf = float(decision_type.get("confidence", 0.0))
             reas = str(decision_type.get("reasoning", ""))
-            raw_factors = decision_type.get("supporting_factors", [])
-            s_fact = json.dumps(raw_factors) if isinstance(raw_factors, list) else str(raw_factors or "[]")
+            s_fact = json.dumps(decision_type.get("supporting_factors", []))
             c_at = str(decision_type.get("created_at")) if decision_type.get("created_at") else None
         else:
             d_type = str(decision_type)
-            s_strat = str(selected_strategy or "unknown")
+            s_strat = str(selected_strategy or "")
             conf = float(confidence or 0.0)
             reas = str(reasoning or "")
-            s_fact = json.dumps(supporting_factors) if isinstance(supporting_factors, list) else str(supporting_factors or "[]")
+            if isinstance(supporting_factors, list):
+                s_fact = json.dumps(supporting_factors)
+            elif isinstance(supporting_factors, str):
+                s_fact = supporting_factors
+            else:
+                s_fact = "[]"
             c_at = str(created_at) if created_at else None
 
         conn = self.connect()
@@ -1168,64 +1185,32 @@ class SQLiteManager:
     # ----------------------------------------------------
     def insert_execution_plan(
         self,
-        decision_type: Any,
-        strategy_type: Optional[str] = None,
-        execution_steps: Optional[Any] = None,
-        risk_level: Optional[str] = None,
-        estimated_duration: Optional[str] = None,
-        requires_approval: Optional[bool] = None,
-        reasoning: Optional[str] = None,
-        created_at: Optional[Any] = None,
+        decision_type: str,
+        strategy_type: str,
+        execution_steps: list,
+        risk_level: str,
+        estimated_duration: str,
+        requires_approval: bool = False,
+        reasoning: str = ""
     ) -> int:
-        """Inserta un plan de ejecución de mantenimiento en la tabla maintenance_execution_plans."""
-        if hasattr(decision_type, "decision_type"):
-            plan = decision_type
-            d_type = str(plan.decision_type)
-            s_type = str(plan.strategy_type)
-            steps = json.dumps(plan.execution_steps) if isinstance(plan.execution_steps, list) else str(plan.execution_steps or "[]")
-            r_level = str(plan.risk_level)
-            e_dur = str(plan.estimated_duration)
-            req_app = 1 if getattr(plan, "requires_approval", False) else 0
-            reas = str(getattr(plan, "reasoning", ""))
-            c_at = plan.created_at.isoformat() if hasattr(plan.created_at, "isoformat") else str(plan.created_at)
-        elif isinstance(decision_type, dict):
-            d_type = str(decision_type.get("decision_type", "default"))
-            s_type = str(decision_type.get("strategy_type", "unknown"))
-            raw_steps = decision_type.get("execution_steps", [])
-            steps = json.dumps(raw_steps) if isinstance(raw_steps, list) else str(raw_steps or "[]")
-            r_level = str(decision_type.get("risk_level", "low"))
-            e_dur = str(decision_type.get("estimated_duration", "0m"))
-            req_app = 1 if decision_type.get("requires_approval") else 0
-            reas = str(decision_type.get("reasoning", ""))
-            c_at = str(decision_type.get("created_at")) if decision_type.get("created_at") else None
-        else:
-            d_type = str(decision_type)
-            s_type = str(strategy_type or "unknown")
-            steps = json.dumps(execution_steps) if isinstance(execution_steps, list) else str(execution_steps or "[]")
-            r_level = str(risk_level or "low")
-            e_dur = str(estimated_duration or "0m")
-            req_app = 1 if requires_approval else 0
-            reas = str(reasoning or "")
-            c_at = str(created_at) if created_at else None
-
+        """Inserta un plan de ejecución de mantenimiento en la base de datos."""
         conn = self.connect()
         cursor = conn.cursor()
-        if c_at is None:
-            cursor.execute(
-                """
-                INSERT INTO maintenance_execution_plans (decision_type, strategy_type, execution_steps, risk_level, estimated_duration, requires_approval, reasoning)
-                VALUES (?, ?, ?, ?, ?, ?, ?);
-                """,
-                (d_type, s_type, steps, r_level, e_dur, req_app, reas)
+        cursor.execute(
+            """
+            INSERT INTO maintenance_execution_plans (decision_type, strategy_type, execution_steps, risk_level, estimated_duration, requires_approval, reasoning)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+            """,
+            (
+                decision_type,
+                strategy_type,
+                json.dumps(execution_steps),
+                risk_level,
+                estimated_duration,
+                1 if requires_approval else 0,
+                reasoning
             )
-        else:
-            cursor.execute(
-                """
-                INSERT INTO maintenance_execution_plans (decision_type, strategy_type, execution_steps, risk_level, estimated_duration, requires_approval, reasoning, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                (d_type, s_type, steps, r_level, e_dur, req_app, reas, c_at)
-            )
+        )
         conn.commit()
         return cursor.lastrowid
 
@@ -1286,60 +1271,26 @@ class SQLiteManager:
         return result
 
     # ----------------------------------------------------
-    # Operaciones CRUD para Execution Validation Reports (Módulo 32)
+    # Operaciones CRUD para Maintenance Execution Validation Layer (Módulo 32)
     # ----------------------------------------------------
     def insert_validation_report(
         self,
-        report: Any = None,
-        plan_id: Optional[int] = None,
-        valid: Optional[bool] = None,
-        risk_level: Optional[str] = None,
-        issues: Optional[Any] = None,
-        recommendation: Optional[str] = None,
-        created_at: Optional[Any] = None,
+        plan_id: int,
+        valid: bool,
+        risk_level: str,
+        issues: list,
+        recommendation: str
     ) -> int:
-        """Inserta un reporte de validación de ejecución en la tabla execution_validation_reports."""
-        if hasattr(report, "plan_id"):
-            p_id = int(report.plan_id)
-            v_val = 1 if report.valid else 0
-            r_level = str(report.risk_level)
-            iss = json.dumps(report.issues) if isinstance(report.issues, list) else str(report.issues or "[]")
-            recom = str(report.recommendation)
-            c_at = report.created_at.isoformat() if hasattr(report.created_at, "isoformat") else str(report.created_at)
-        elif isinstance(report, dict):
-            p_id = int(report.get("plan_id", 0))
-            v_val = 1 if report.get("valid") else 0
-            r_level = str(report.get("risk_level", "low"))
-            raw_issues = report.get("issues", [])
-            iss = json.dumps(raw_issues) if isinstance(raw_issues, list) else str(raw_issues or "[]")
-            recom = str(report.get("recommendation", ""))
-            c_at = str(report.get("created_at")) if report.get("created_at") else None
-        else:
-            p_id = int(plan_id or 0)
-            v_val = 1 if valid else 0
-            r_level = str(risk_level or "low")
-            iss = json.dumps(issues) if isinstance(issues, list) else str(issues or "[]")
-            recom = str(recommendation or "")
-            c_at = str(created_at) if created_at else None
-
+        """Inserta un reporte de validación de plan de ejecución en la base de datos."""
         conn = self.connect()
         cursor = conn.cursor()
-        if c_at is None:
-            cursor.execute(
-                """
-                INSERT INTO execution_validation_reports (plan_id, valid, risk_level, issues, recommendation)
-                VALUES (?, ?, ?, ?, ?);
-                """,
-                (p_id, v_val, r_level, iss, recom)
-            )
-        else:
-            cursor.execute(
-                """
-                INSERT INTO execution_validation_reports (plan_id, valid, risk_level, issues, recommendation, created_at)
-                VALUES (?, ?, ?, ?, ?, ?);
-                """,
-                (p_id, v_val, r_level, iss, recom, c_at)
-            )
+        cursor.execute(
+            """
+            INSERT INTO execution_validation_reports (plan_id, valid, risk_level, issues, recommendation)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (plan_id, 1 if valid else 0, risk_level, json.dumps(issues), recommendation)
+        )
         conn.commit()
         return cursor.lastrowid
 
@@ -1391,6 +1342,65 @@ class SQLiteManager:
                 "risk_level": row["risk_level"],
                 "issues": issues_list,
                 "recommendation": row["recommendation"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # Operaciones para Execution Approval Layer (Módulo 33)
+    # ----------------------------------------------------
+    def insert_execution_approval(self, plan_id: int, validation_id: int, approval_status: str, approved: bool, reason: str) -> int:
+        """Inserta un registro de aprobación de ejecución en la base de datos."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO execution_approvals (plan_id, validation_id, approval_status, approved, reason)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (plan_id, validation_id, approval_status, 1 if approved else 0, reason)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_execution_approval(self, approval_id: int) -> dict:
+        """Obtiene una aprobación por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, plan_id, validation_id, approval_status, approved, reason, created_at FROM execution_approvals WHERE id = ?;",
+            (approval_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "plan_id": row["plan_id"],
+                "validation_id": row["validation_id"],
+                "approval_status": row["approval_status"],
+                "approved": bool(row["approved"]),
+                "reason": row["reason"],
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_execution_approvals(self) -> list:
+        """Obtiene todas las aprobaciones ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, plan_id, validation_id, approval_status, approved, reason, created_at FROM execution_approvals ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "plan_id": row["plan_id"],
+                "validation_id": row["validation_id"],
+                "approval_status": row["approval_status"],
+                "approved": bool(row["approved"]),
+                "reason": row["reason"],
                 "created_at": str(row["created_at"]),
             })
         return result
