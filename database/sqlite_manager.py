@@ -210,6 +210,21 @@ class SQLiteManager:
             );
         """)
 
+        # 16. Tabla maintenance_execution_plans (Módulo 31)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_execution_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                decision_type TEXT NOT NULL,
+                strategy_type TEXT NOT NULL,
+                execution_steps TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                estimated_duration TEXT NOT NULL,
+                requires_approval INTEGER NOT NULL DEFAULT 0,
+                reasoning TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -1131,6 +1146,128 @@ class SQLiteManager:
                 "confidence": row["confidence"],
                 "reasoning": row["reasoning"],
                 "supporting_factors": factors_list,
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Maintenance Execution Planning Layer (Módulo 31)
+    # ----------------------------------------------------
+    def insert_execution_plan(
+        self,
+        decision_type: Any,
+        strategy_type: Optional[str] = None,
+        execution_steps: Optional[Any] = None,
+        risk_level: Optional[str] = None,
+        estimated_duration: Optional[str] = None,
+        requires_approval: Optional[bool] = None,
+        reasoning: Optional[str] = None,
+        created_at: Optional[Any] = None,
+    ) -> int:
+        """Inserta un plan de ejecución de mantenimiento en la tabla maintenance_execution_plans."""
+        if hasattr(decision_type, "decision_type"):
+            plan = decision_type
+            d_type = str(plan.decision_type)
+            s_type = str(plan.strategy_type)
+            steps = json.dumps(plan.execution_steps) if isinstance(plan.execution_steps, list) else str(plan.execution_steps or "[]")
+            r_level = str(plan.risk_level)
+            e_dur = str(plan.estimated_duration)
+            req_app = 1 if getattr(plan, "requires_approval", False) else 0
+            reas = str(getattr(plan, "reasoning", ""))
+            c_at = plan.created_at.isoformat() if hasattr(plan.created_at, "isoformat") else str(plan.created_at)
+        elif isinstance(decision_type, dict):
+            d_type = str(decision_type.get("decision_type", "default"))
+            s_type = str(decision_type.get("strategy_type", "unknown"))
+            raw_steps = decision_type.get("execution_steps", [])
+            steps = json.dumps(raw_steps) if isinstance(raw_steps, list) else str(raw_steps or "[]")
+            r_level = str(decision_type.get("risk_level", "low"))
+            e_dur = str(decision_type.get("estimated_duration", "0m"))
+            req_app = 1 if decision_type.get("requires_approval") else 0
+            reas = str(decision_type.get("reasoning", ""))
+            c_at = str(decision_type.get("created_at")) if decision_type.get("created_at") else None
+        else:
+            d_type = str(decision_type)
+            s_type = str(strategy_type or "unknown")
+            steps = json.dumps(execution_steps) if isinstance(execution_steps, list) else str(execution_steps or "[]")
+            r_level = str(risk_level or "low")
+            e_dur = str(estimated_duration or "0m")
+            req_app = 1 if requires_approval else 0
+            reas = str(reasoning or "")
+            c_at = str(created_at) if created_at else None
+
+        conn = self.connect()
+        cursor = conn.cursor()
+        if c_at is None:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_execution_plans (decision_type, strategy_type, execution_steps, risk_level, estimated_duration, requires_approval, reasoning)
+                VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
+                (d_type, s_type, steps, r_level, e_dur, req_app, reas)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_execution_plans (decision_type, strategy_type, execution_steps, risk_level, estimated_duration, requires_approval, reasoning, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (d_type, s_type, steps, r_level, e_dur, req_app, reas, c_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_execution_plan(self, plan_id: int) -> Optional[dict]:
+        """Obtiene un plan de ejecución por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, decision_type, strategy_type, execution_steps, risk_level, estimated_duration, requires_approval, reasoning, created_at FROM maintenance_execution_plans WHERE id = ?;",
+            (plan_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            raw_steps = row["execution_steps"]
+            try:
+                steps_list = json.loads(raw_steps) if raw_steps else []
+            except Exception:
+                steps_list = [raw_steps] if raw_steps else []
+            return {
+                "id": row["id"],
+                "decision_type": row["decision_type"],
+                "strategy_type": row["strategy_type"],
+                "execution_steps": steps_list,
+                "risk_level": row["risk_level"],
+                "estimated_duration": row["estimated_duration"],
+                "requires_approval": bool(row["requires_approval"]),
+                "reasoning": row["reasoning"],
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_execution_plans(self) -> list:
+        """Obtiene todos los planes de ejecución ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, decision_type, strategy_type, execution_steps, risk_level, estimated_duration, requires_approval, reasoning, created_at FROM maintenance_execution_plans ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            raw_steps = row["execution_steps"]
+            try:
+                steps_list = json.loads(raw_steps) if raw_steps else []
+            except Exception:
+                steps_list = [raw_steps] if raw_steps else []
+            result.append({
+                "id": row["id"],
+                "decision_type": row["decision_type"],
+                "strategy_type": row["strategy_type"],
+                "execution_steps": steps_list,
+                "risk_level": row["risk_level"],
+                "estimated_duration": row["estimated_duration"],
+                "requires_approval": bool(row["requires_approval"]),
+                "reasoning": row["reasoning"],
                 "created_at": str(row["created_at"]),
             })
         return result

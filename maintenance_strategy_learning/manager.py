@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Optional
+from database.sqlite_manager import SQLiteManager
 from maintenance_strategy_evaluation.manager import StrategyEvaluationManager
 from .models import StrategyLearningReport
 
@@ -16,8 +17,14 @@ class StrategyLearningManager:
     def __init__(
         self,
         evaluation_manager: Optional[StrategyEvaluationManager] = None,
+        db_manager: Optional[SQLiteManager] = None,
     ):
-        self.evaluation_manager = evaluation_manager or StrategyEvaluationManager()
+        if evaluation_manager:
+            self.evaluation_manager = evaluation_manager
+        elif db_manager:
+            self.evaluation_manager = StrategyEvaluationManager(db_manager=db_manager)
+        else:
+            self.evaluation_manager = StrategyEvaluationManager()
 
     def generate_learning_report(self) -> StrategyLearningReport:
         """

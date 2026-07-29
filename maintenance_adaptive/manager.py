@@ -21,9 +21,9 @@ class AdaptiveRecommendationManager:
         strategy_manager: Optional[MaintenanceStrategyManager] = None,
         db_manager: Optional[SQLiteManager] = None,
     ):
-        self.learning_manager = learning_manager or StrategyLearningManager()
-        self.strategy_manager = strategy_manager or MaintenanceStrategyManager()
         self.db_manager = db_manager
+        self.learning_manager = learning_manager or StrategyLearningManager(db_manager=self.db_manager)
+        self.strategy_manager = strategy_manager or MaintenanceStrategyManager()
 
     def generate_recommendation(self) -> AdaptiveRecommendation:
         """
