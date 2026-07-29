@@ -251,6 +251,43 @@ class SQLiteManager:
             );
         """)
 
+        # 19. Tabla execution_tracking (Módulo 34)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS execution_tracking (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                approval_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                progress REAL NOT NULL,
+                message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 20. Tabla execution_results (Módulo 35)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS execution_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tracking_id INTEGER NOT NULL,
+                result_status TEXT NOT NULL,
+                impact TEXT NOT NULL,
+                summary TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 21. Tabla execution_feedback (Módulo 36)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS execution_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                result_id INTEGER NOT NULL,
+                feedback_type TEXT NOT NULL,
+                quality_score REAL NOT NULL,
+                learning_notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -1085,26 +1122,22 @@ class SQLiteManager:
             s_strat = str(dec.selected_strategy)
             conf = float(dec.confidence)
             reas = str(dec.reasoning)
-            s_fact = json.dumps(dec.supporting_factors or [])
+            s_fact = json.dumps(dec.supporting_factors) if isinstance(dec.supporting_factors, list) else str(dec.supporting_factors or "[]")
             c_at = dec.created_at.isoformat() if hasattr(dec.created_at, "isoformat") else str(dec.created_at)
         elif isinstance(decision_type, dict):
-            d_type = str(decision_type.get("decision_type", "unknown"))
-            s_strat = str(decision_type.get("selected_strategy", ""))
+            d_type = str(decision_type.get("decision_type", "default"))
+            s_strat = str(decision_type.get("selected_strategy", "unknown"))
             conf = float(decision_type.get("confidence", 0.0))
             reas = str(decision_type.get("reasoning", ""))
-            s_fact = json.dumps(decision_type.get("supporting_factors", []))
+            raw_factors = decision_type.get("supporting_factors", [])
+            s_fact = json.dumps(raw_factors) if isinstance(raw_factors, list) else str(raw_factors or "[]")
             c_at = str(decision_type.get("created_at")) if decision_type.get("created_at") else None
         else:
             d_type = str(decision_type)
-            s_strat = str(selected_strategy or "")
+            s_strat = str(selected_strategy or "unknown")
             conf = float(confidence or 0.0)
             reas = str(reasoning or "")
-            if isinstance(supporting_factors, list):
-                s_fact = json.dumps(supporting_factors)
-            elif isinstance(supporting_factors, str):
-                s_fact = supporting_factors
-            else:
-                s_fact = "[]"
+            s_fact = json.dumps(supporting_factors) if isinstance(supporting_factors, list) else str(supporting_factors or "[]")
             c_at = str(created_at) if created_at else None
 
         conn = self.connect()
@@ -1185,32 +1218,64 @@ class SQLiteManager:
     # ----------------------------------------------------
     def insert_execution_plan(
         self,
-        decision_type: str,
-        strategy_type: str,
-        execution_steps: list,
-        risk_level: str,
-        estimated_duration: str,
-        requires_approval: bool = False,
-        reasoning: str = ""
+        decision_type: Any,
+        strategy_type: Optional[str] = None,
+        execution_steps: Optional[Any] = None,
+        risk_level: Optional[str] = None,
+        estimated_duration: Optional[str] = None,
+        requires_approval: Optional[bool] = None,
+        reasoning: Optional[str] = None,
+        created_at: Optional[Any] = None,
     ) -> int:
-        """Inserta un plan de ejecución de mantenimiento en la base de datos."""
+        """Inserta un plan de ejecución de mantenimiento en la tabla maintenance_execution_plans."""
+        if hasattr(decision_type, "decision_type"):
+            plan = decision_type
+            d_type = str(plan.decision_type)
+            s_type = str(plan.strategy_type)
+            steps = json.dumps(plan.execution_steps) if isinstance(plan.execution_steps, list) else str(plan.execution_steps or "[]")
+            r_level = str(plan.risk_level)
+            e_dur = str(plan.estimated_duration)
+            req_app = 1 if getattr(plan, "requires_approval", False) else 0
+            reas = str(getattr(plan, "reasoning", ""))
+            c_at = plan.created_at.isoformat() if hasattr(plan.created_at, "isoformat") else str(plan.created_at)
+        elif isinstance(decision_type, dict):
+            d_type = str(decision_type.get("decision_type", "default"))
+            s_type = str(decision_type.get("strategy_type", "unknown"))
+            raw_steps = decision_type.get("execution_steps", [])
+            steps = json.dumps(raw_steps) if isinstance(raw_steps, list) else str(raw_steps or "[]")
+            r_level = str(decision_type.get("risk_level", "low"))
+            e_dur = str(decision_type.get("estimated_duration", "0m"))
+            req_app = 1 if decision_type.get("requires_approval") else 0
+            reas = str(decision_type.get("reasoning", ""))
+            c_at = str(decision_type.get("created_at")) if decision_type.get("created_at") else None
+        else:
+            d_type = str(decision_type)
+            s_type = str(strategy_type or "unknown")
+            steps = json.dumps(execution_steps) if isinstance(execution_steps, list) else str(execution_steps or "[]")
+            r_level = str(risk_level or "low")
+            e_dur = str(estimated_duration or "0m")
+            req_app = 1 if requires_approval else 0
+            reas = str(reasoning or "")
+            c_at = str(created_at) if created_at else None
+
         conn = self.connect()
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO maintenance_execution_plans (decision_type, strategy_type, execution_steps, risk_level, estimated_duration, requires_approval, reasoning)
-            VALUES (?, ?, ?, ?, ?, ?, ?);
-            """,
-            (
-                decision_type,
-                strategy_type,
-                json.dumps(execution_steps),
-                risk_level,
-                estimated_duration,
-                1 if requires_approval else 0,
-                reasoning
+        if c_at is None:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_execution_plans (decision_type, strategy_type, execution_steps, risk_level, estimated_duration, requires_approval, reasoning)
+                VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
+                (d_type, s_type, steps, r_level, e_dur, req_app, reas)
             )
-        )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_execution_plans (decision_type, strategy_type, execution_steps, risk_level, estimated_duration, requires_approval, reasoning, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (d_type, s_type, steps, r_level, e_dur, req_app, reas, c_at)
+            )
         conn.commit()
         return cursor.lastrowid
 
@@ -1271,26 +1336,60 @@ class SQLiteManager:
         return result
 
     # ----------------------------------------------------
-    # Operaciones CRUD para Maintenance Execution Validation Layer (Módulo 32)
+    # Operaciones CRUD para Execution Validation Reports (Módulo 32)
     # ----------------------------------------------------
     def insert_validation_report(
         self,
-        plan_id: int,
-        valid: bool,
-        risk_level: str,
-        issues: list,
-        recommendation: str
+        report: Any = None,
+        plan_id: Optional[int] = None,
+        valid: Optional[bool] = None,
+        risk_level: Optional[str] = None,
+        issues: Optional[Any] = None,
+        recommendation: Optional[str] = None,
+        created_at: Optional[Any] = None,
     ) -> int:
-        """Inserta un reporte de validación de plan de ejecución en la base de datos."""
+        """Inserta un reporte de validación de ejecución en la tabla execution_validation_reports."""
+        if hasattr(report, "plan_id"):
+            p_id = int(report.plan_id)
+            v_val = 1 if report.valid else 0
+            r_level = str(report.risk_level)
+            iss = json.dumps(report.issues) if isinstance(report.issues, list) else str(report.issues or "[]")
+            recom = str(report.recommendation)
+            c_at = report.created_at.isoformat() if hasattr(report.created_at, "isoformat") else str(report.created_at)
+        elif isinstance(report, dict):
+            p_id = int(report.get("plan_id", 0))
+            v_val = 1 if report.get("valid") else 0
+            r_level = str(report.get("risk_level", "low"))
+            raw_issues = report.get("issues", [])
+            iss = json.dumps(raw_issues) if isinstance(raw_issues, list) else str(raw_issues or "[]")
+            recom = str(report.get("recommendation", ""))
+            c_at = str(report.get("created_at")) if report.get("created_at") else None
+        else:
+            p_id = int(plan_id or 0)
+            v_val = 1 if valid else 0
+            r_level = str(risk_level or "low")
+            iss = json.dumps(issues) if isinstance(issues, list) else str(issues or "[]")
+            recom = str(recommendation or "")
+            c_at = str(created_at) if created_at else None
+
         conn = self.connect()
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO execution_validation_reports (plan_id, valid, risk_level, issues, recommendation)
-            VALUES (?, ?, ?, ?, ?);
-            """,
-            (plan_id, 1 if valid else 0, risk_level, json.dumps(issues), recommendation)
-        )
+        if c_at is None:
+            cursor.execute(
+                """
+                INSERT INTO execution_validation_reports (plan_id, valid, risk_level, issues, recommendation)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (p_id, v_val, r_level, iss, recom)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO execution_validation_reports (plan_id, valid, risk_level, issues, recommendation, created_at)
+                VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (p_id, v_val, r_level, iss, recom, c_at)
+            )
         conn.commit()
         return cursor.lastrowid
 
@@ -1404,6 +1503,231 @@ class SQLiteManager:
                 "created_at": str(row["created_at"]),
             })
         return result
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Execution Tracking (Módulo 34)
+    # ----------------------------------------------------
+    def insert_execution_tracking(self, approval_id: int, status: str, progress: float, message: str = "") -> int:
+        """Inserta un registro de seguimiento de ejecución en execution_tracking."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO execution_tracking (approval_id, status, progress, message)
+            VALUES (?, ?, ?, ?);
+            """,
+            (approval_id, status, progress, message)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def insert_tracking(self, approval_id: int, status: str, progress: float, message: str = "") -> int:
+        """Alias para insert_execution_tracking."""
+        return self.insert_execution_tracking(approval_id, status, progress, message)
+
+    def update_execution_tracking(self, tracking_id: int, status: str, progress: float, message: str = "") -> bool:
+        """Actualiza el estado, progreso y mensaje de un seguimiento de ejecución."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE execution_tracking
+            SET status = ?, progress = ?, message = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?;
+            """,
+            (status, progress, message, tracking_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def update_tracking(self, tracking_id: int, status: str, progress: float, message: str = "") -> bool:
+        """Alias para update_execution_tracking."""
+        return self.update_execution_tracking(tracking_id, status, progress, message)
+
+    def get_execution_tracking(self, tracking_id: int) -> Optional[dict]:
+        """Obtiene un registro de seguimiento por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, approval_id, status, progress, message, created_at, updated_at FROM execution_tracking WHERE id = ?;",
+            (tracking_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "approval_id": row["approval_id"],
+                "status": row["status"],
+                "progress": float(row["progress"]),
+                "message": row["message"] or "",
+                "created_at": str(row["created_at"]),
+                "updated_at": str(row["updated_at"]),
+            }
+        return None
+
+    def get_tracking(self, tracking_id: int) -> Optional[dict]:
+        """Alias para get_execution_tracking."""
+        return self.get_execution_tracking(tracking_id)
+
+    def get_execution_trackings(self) -> list:
+        """Obtiene todos los registros de seguimiento ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, approval_id, status, progress, message, created_at, updated_at FROM execution_tracking ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "approval_id": row["approval_id"],
+                "status": row["status"],
+                "progress": float(row["progress"]),
+                "message": row["message"] or "",
+                "created_at": str(row["created_at"]),
+                "updated_at": str(row["updated_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Execution Result (Módulo 35)
+    # ----------------------------------------------------
+    def insert_execution_result(self, tracking_id: int, result_status: str, impact: str, summary: str = "") -> int:
+        """Inserta un resultado de ejecución en execution_results."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO execution_results (tracking_id, result_status, impact, summary)
+            VALUES (?, ?, ?, ?);
+            """,
+            (tracking_id, result_status, impact, summary)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def insert_result(self, tracking_id: int, result_status: str, impact: str, summary: str = "") -> int:
+        """Alias para insert_execution_result."""
+        return self.insert_execution_result(tracking_id, result_status, impact, summary)
+
+    def get_execution_result(self, result_id: int) -> Optional[dict]:
+        """Obtiene un resultado de ejecución por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, tracking_id, result_status, impact, summary, created_at FROM execution_results WHERE id = ?;",
+            (result_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "tracking_id": row["tracking_id"],
+                "result_status": row["result_status"],
+                "impact": row["impact"],
+                "summary": row["summary"] or "",
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_result(self, result_id: int) -> Optional[dict]:
+        """Alias para get_execution_result."""
+        return self.get_execution_result(result_id)
+
+    def get_execution_results(self) -> list:
+        """Obtiene todos los resultados de ejecución ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, tracking_id, result_status, impact, summary, created_at FROM execution_results ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "tracking_id": row["tracking_id"],
+                "result_status": row["result_status"],
+                "impact": row["impact"],
+                "summary": row["summary"] or "",
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    def get_results(self) -> list:
+        """Alias para get_execution_results."""
+        return self.get_execution_results()
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Execution Feedback (Módulo 36)
+    # ----------------------------------------------------
+    def insert_execution_feedback(self, result_id: int, feedback_type: str, quality_score: float, learning_notes: str = "") -> int:
+        """Inserta un registro de retroalimentación de ejecución en execution_feedback."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO execution_feedback (result_id, feedback_type, quality_score, learning_notes)
+            VALUES (?, ?, ?, ?);
+            """,
+            (result_id, feedback_type, quality_score, learning_notes)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def insert_feedback(self, result_id: int, feedback_type: str, quality_score: float, learning_notes: str = "") -> int:
+        """Alias para insert_execution_feedback."""
+        return self.insert_execution_feedback(result_id, feedback_type, quality_score, learning_notes)
+
+    def get_execution_feedback(self, feedback_id: int) -> Optional[dict]:
+        """Obtiene un registro de feedback por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, result_id, feedback_type, quality_score, learning_notes, created_at FROM execution_feedback WHERE id = ?;",
+            (feedback_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "result_id": row["result_id"],
+                "feedback_type": row["feedback_type"],
+                "quality_score": float(row["quality_score"]),
+                "learning_notes": row["learning_notes"] or "",
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_feedback(self, feedback_id: int) -> Optional[dict]:
+        """Alias para get_execution_feedback."""
+        return self.get_execution_feedback(feedback_id)
+
+    def get_execution_feedbacks(self) -> list:
+        """Obtiene todos los registros de feedback ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, result_id, feedback_type, quality_score, learning_notes, created_at FROM execution_feedback ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "result_id": row["result_id"],
+                "feedback_type": row["feedback_type"],
+                "quality_score": float(row["quality_score"]),
+                "learning_notes": row["learning_notes"] or "",
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    def get_feedbacks(self) -> list:
+        """Alias para get_execution_feedbacks."""
+        return self.get_execution_feedbacks()
+
 
     def close(self) -> None:
         """Cierra la conexión activa con la base de datos."""
