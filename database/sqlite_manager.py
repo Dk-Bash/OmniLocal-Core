@@ -368,6 +368,48 @@ class SQLiteManager:
             );
         """)
 
+        # 28. Tabla maintenance_workflows (Módulo 43)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_workflows (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                decision_id INTEGER NOT NULL,
+                workflow_type TEXT NOT NULL,
+                steps TEXT NOT NULL,
+                current_step INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 29. Tabla maintenance_policy_results (Módulo 44)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_policy_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workflow_id INTEGER NOT NULL,
+                allowed INTEGER NOT NULL,
+                risk_level TEXT NOT NULL,
+                violations TEXT,
+                reasoning TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (workflow_id) REFERENCES maintenance_workflows(id) ON DELETE CASCADE
+            );
+        """)
+
+        # 30. Tabla maintenance_coordination_results (Módulo 45)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_coordination_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workflow_id INTEGER NOT NULL,
+                policy_id INTEGER NOT NULL,
+                coordination_status TEXT NOT NULL,
+                next_action TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (workflow_id) REFERENCES maintenance_workflows(id) ON DELETE CASCADE,
+                FOREIGN KEY (policy_id) REFERENCES maintenance_policy_results(id) ON DELETE CASCADE
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -2200,6 +2242,209 @@ class SQLiteManager:
                 "improvement_score": float(row["improvement_score"]),
                 "optimization_type": row["optimization_type"],
                 "summary": row["summary"] or "",
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Bloque 11 (Módulos 43-45)
+    # ----------------------------------------------------
+
+    def insert_workflow(
+        self,
+        decision_id: int,
+        workflow_type: str,
+        steps: str,
+        current_step: int = 0,
+        status: str = "pending",
+    ) -> int:
+        """Inserta un nuevo registro de flujo de trabajo de mantenimiento (Módulo 43)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO maintenance_workflows (decision_id, workflow_type, steps, current_step, status)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (decision_id, workflow_type, steps, current_step, status),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_workflow(self, workflow_id: int) -> Optional[dict]:
+        """Obtiene un flujo de trabajo de mantenimiento por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, decision_id, workflow_type, steps, current_step, status, created_at FROM maintenance_workflows WHERE id = ?;",
+            (workflow_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "decision_id": row["decision_id"],
+                "workflow_type": row["workflow_type"],
+                "steps": row["steps"],
+                "current_step": int(row["current_step"]),
+                "status": row["status"],
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def update_workflow_step(self, workflow_id: int, current_step: int, status: str) -> None:
+        """Actualiza el paso actual y el estado de un flujo de trabajo."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE maintenance_workflows SET current_step = ?, status = ? WHERE id = ?;",
+            (current_step, status, workflow_id),
+        )
+        conn.commit()
+
+    def get_workflows(self) -> list:
+        """Obtiene todos los flujos de trabajo registrados."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, decision_id, workflow_type, steps, current_step, status, created_at FROM maintenance_workflows ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "decision_id": row["decision_id"],
+                "workflow_type": row["workflow_type"],
+                "steps": row["steps"],
+                "current_step": int(row["current_step"]),
+                "status": row["status"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    def insert_policy_result(
+        self,
+        workflow_id: int,
+        allowed: bool,
+        risk_level: str,
+        reasoning: str,
+        violations: str = "",
+    ) -> int:
+        """Inserta un resultado de evaluación de política (Módulo 44)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO maintenance_policy_results (workflow_id, allowed, risk_level, violations, reasoning)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (workflow_id, 1 if allowed else 0, risk_level, violations, reasoning),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_policy_result(self, policy_id: int) -> Optional[dict]:
+        """Obtiene un resultado de evaluación de política por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, workflow_id, allowed, risk_level, violations, reasoning, created_at FROM maintenance_policy_results WHERE id = ?;",
+            (policy_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "workflow_id": row["workflow_id"],
+                "allowed": bool(row["allowed"]),
+                "risk_level": row["risk_level"],
+                "violations": row["violations"] or "",
+                "reasoning": row["reasoning"],
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_policy_results(self) -> list:
+        """Obtiene todos los resultados de políticas registrados."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, workflow_id, allowed, risk_level, violations, reasoning, created_at FROM maintenance_policy_results ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "workflow_id": row["workflow_id"],
+                "allowed": bool(row["allowed"]),
+                "risk_level": row["risk_level"],
+                "violations": row["violations"] or "",
+                "reasoning": row["reasoning"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    def insert_coordination_result(
+        self,
+        workflow_id: int,
+        policy_id: int,
+        coordination_status: str,
+        next_action: str,
+        summary: str,
+    ) -> int:
+        """Inserta un resultado de coordinación autónoma (Módulo 45)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO maintenance_coordination_results (workflow_id, policy_id, coordination_status, next_action, summary)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (workflow_id, policy_id, coordination_status, next_action, summary),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_coordination_result(self, coordination_id: int) -> Optional[dict]:
+        """Obtiene un resultado de coordinación por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, workflow_id, policy_id, coordination_status, next_action, summary, created_at FROM maintenance_coordination_results WHERE id = ?;",
+            (coordination_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "workflow_id": row["workflow_id"],
+                "policy_id": row["policy_id"],
+                "coordination_status": row["coordination_status"],
+                "next_action": row["next_action"],
+                "summary": row["summary"],
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_coordination_history(self) -> list:
+        """Obtiene todo el historial de resultados de coordinación."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, workflow_id, policy_id, coordination_status, next_action, summary, created_at FROM maintenance_coordination_results ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "workflow_id": row["workflow_id"],
+                "policy_id": row["policy_id"],
+                "coordination_status": row["coordination_status"],
+                "next_action": row["next_action"],
+                "summary": row["summary"],
                 "created_at": str(row["created_at"]),
             })
         return result
