@@ -325,4 +325,1888 @@ class SQLiteManager:
             );
         """)
 
+        # 25. Tabla maintenance_correlations (Módulo 40)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_correlations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                strategy_type TEXT NOT NULL,
+                pattern_type TEXT NOT NULL,
+                success_rate REAL NOT NULL,
+                sample_size INTEGER NOT NULL,
+                confidence REAL NOT NULL,
+                description TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 26. Tabla adaptive_decisions (Módulo 41)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS adaptive_decisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                correlation_id INTEGER NOT NULL,
+                decision_type TEXT NOT NULL,
+                recommended_strategy TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                reasoning TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (correlation_id) REFERENCES maintenance_correlations(id) ON DELETE CASCADE
+            );
+        """)
+
+        # 27. Tabla optimization_feedback (Módulo 42)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS optimization_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                decision_id INTEGER NOT NULL,
+                previous_confidence REAL NOT NULL,
+                new_confidence REAL NOT NULL,
+                improvement_score REAL NOT NULL,
+                optimization_type TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (decision_id) REFERENCES adaptive_decisions(id) ON DELETE CASCADE
+            );
+        """)
+
         self.conn.commit()
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Knowledge Layer (Módulo 7)
+    # ----------------------------------------------------
+    def insert_knowledge_node(self, name: str, node_type: str, description: str = "", created_at: Optional[str] = None) -> int:
+        """Inserta un nodo de conocimiento en la tabla knowledge_nodes y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO knowledge_nodes (name, node_type, description)
+                VALUES (?, ?, ?);
+                """,
+                (name, node_type, description)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO knowledge_nodes (name, node_type, description, created_at)
+                VALUES (?, ?, ?, ?);
+                """,
+                (name, node_type, description, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_knowledge_node(self, node_id: int) -> Optional[dict]:
+        """Recupera un nodo de conocimiento por ID devolviendo un diccionario o None."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM knowledge_nodes WHERE id = ?;", (node_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def insert_knowledge_relation(self, source_id: int, target_id: int, relation_type: str, created_at: Optional[str] = None) -> int:
+        """Inserta una relación de conocimiento en la tabla knowledge_relations y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO knowledge_relations (source_id, target_id, relation_type)
+                VALUES (?, ?, ?);
+                """,
+                (source_id, target_id, relation_type)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO knowledge_relations (source_id, target_id, relation_type, created_at)
+                VALUES (?, ?, ?, ?);
+                """,
+                (source_id, target_id, relation_type, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_knowledge_relations(self, node_id: int) -> list:
+        """Recupera todas las relaciones asociadas a un nodo (source o target)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM knowledge_relations
+            WHERE source_id = ? OR target_id = ?
+            ORDER BY id ASC;
+            """,
+            (node_id, node_id)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def search_memories(self, query: str) -> list:
+        """Busca recuerdos cuyo contenido coincida con la consulta (LIKE)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM memories WHERE content LIKE ? ORDER BY id ASC;",
+            (f"%{query}%",)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def search_knowledge_nodes(self, query: str) -> list:
+        """Busca nodos de conocimiento cuyo nombre, descripción o tipo coincidan con la consulta (LIKE)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM knowledge_nodes WHERE name LIKE ? OR description LIKE ? OR node_type LIKE ? ORDER BY id ASC;",
+            (f"%{query}%", f"%{query}%", f"%{query}%")
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Context Engine (Módulo 10)
+    # ----------------------------------------------------
+    def insert_context_session(self, session_name: str, active: bool = True, created_at: Optional[str] = None) -> int:
+        """Inserta una sesión de contexto en context_sessions y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        active_int = 1 if active else 0
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO context_sessions (session_name, active)
+                VALUES (?, ?);
+                """,
+                (session_name, active_int)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO context_sessions (session_name, active, created_at)
+                VALUES (?, ?, ?);
+                """,
+                (session_name, active_int, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_context_session(self, session_id: int) -> Optional[dict]:
+        """Recupera una sesión de contexto por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM context_sessions WHERE id = ?;", (session_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d['active'] = bool(d['active'])
+        return d
+
+    def update_context_session_active(self, session_id: int, active: bool) -> bool:
+        """Actualiza el estado 'active' de una sesión de contexto."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        active_int = 1 if active else 0
+        cursor.execute(
+            "UPDATE context_sessions SET active = ? WHERE id = ?;",
+            (active_int, session_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def insert_context_message(self, session_id: int, role: str, content: str, created_at: Optional[str] = None) -> int:
+        """Inserta un mensaje de contexto en context_messages y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO context_messages (session_id, role, content)
+                VALUES (?, ?, ?);
+                """,
+                (session_id, role, content)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO context_messages (session_id, role, content, created_at)
+                VALUES (?, ?, ?, ?);
+                """,
+                (session_id, role, content, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_recent_context_messages(self, session_id: int, limit: int = 10) -> list:
+        """Recupera los mensajes más recientes de una sesión en orden cronológico."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM (
+                SELECT * FROM context_messages
+                WHERE session_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+            ) ORDER BY id ASC;
+            """,
+            (session_id, limit)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para User Profile & Preferences (Módulo 11)
+    # ----------------------------------------------------
+    def insert_user_profile(self, username: str, display_name: str, language: str = "es", created_at: Optional[str] = None) -> int:
+        """Inserta un perfil de usuario en user_profiles y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO user_profiles (username, display_name, language)
+                VALUES (?, ?, ?);
+                """,
+                (username, display_name, language)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO user_profiles (username, display_name, language, created_at)
+                VALUES (?, ?, ?, ?);
+                """,
+                (username, display_name, language, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_user_profile(self, user_id: int) -> Optional[dict]:
+        """Obtiene un perfil de usuario por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM user_profiles WHERE id = ?;",
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def update_user_profile(self, user_id: int, display_name: Optional[str] = None, language: Optional[str] = None) -> bool:
+        """Actualiza la información visible (nombre visible, idioma) de un usuario."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        updates = []
+        params = []
+        if display_name is not None:
+            updates.append("display_name = ?")
+            params.append(display_name)
+        if language is not None:
+            updates.append("language = ?")
+            params.append(language)
+        if not updates:
+            return False
+        params.append(user_id)
+        query = f"UPDATE user_profiles SET {', '.join(updates)} WHERE id = ?;"
+        cursor.execute(query, tuple(params))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def set_user_preference(self, user_id: int, key: str, value: str, created_at: Optional[str] = None) -> int:
+        """Guarda o actualiza una preferencia para un usuario."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id FROM user_preferences WHERE user_id = ? AND key = ?;",
+            (user_id, key)
+        )
+        existing = cursor.fetchone()
+        if existing:
+            pref_id = existing["id"]
+            cursor.execute(
+                "UPDATE user_preferences SET value = ? WHERE id = ?;",
+                (value, pref_id)
+            )
+            conn.commit()
+            return pref_id
+        else:
+            if created_at is None:
+                cursor.execute(
+                    """
+                    INSERT INTO user_preferences (user_id, key, value)
+                    VALUES (?, ?, ?);
+                    """,
+                    (user_id, key, value)
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO user_preferences (user_id, key, value, created_at)
+                    VALUES (?, ?, ?, ?);
+                    """,
+                    (user_id, key, value, created_at)
+                )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_user_preferences(self, user_id: int) -> list:
+        """Obtiene todas las preferencias de un usuario."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM user_preferences WHERE user_id = ? ORDER BY id ASC;",
+            (user_id,)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Self Evaluation & Feedback (Módulo 14)
+    # ----------------------------------------------------
+    def insert_interaction_feedback(
+        self, interaction_id: int, rating: int, confidence: float, comment: str = "", created_at: Optional[str] = None
+    ) -> int:
+        """Inserta un registro de feedback de interacción en interaction_feedback y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO interaction_feedback (interaction_id, rating, confidence, comment)
+                VALUES (?, ?, ?, ?);
+                """,
+                (interaction_id, rating, confidence, comment)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO interaction_feedback (interaction_id, rating, confidence, comment, created_at)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (interaction_id, rating, confidence, comment, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_interaction_feedback_by_id(self, feedback_id: int) -> Optional[dict]:
+        """Obtiene una evaluación/feedback por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM interaction_feedback WHERE id = ?;",
+            (feedback_id,)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_interaction_feedback_by_interaction(self, interaction_id: int) -> list:
+        """Obtiene todas las evaluaciones asociadas a una interacción."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM interaction_feedback WHERE interaction_id = ? ORDER BY id ASC;",
+            (interaction_id,)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones de Métricas y Analíticas (Módulo 15)
+    # ----------------------------------------------------
+    def count_memories(self) -> int:
+        """Cuenta el total de registros en la tabla memories."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM memories;")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+    def count_sessions(self) -> int:
+        """Cuenta el total de registros en la tabla context_sessions."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM context_sessions;")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+    def count_interactions(self) -> int:
+        """Cuenta el total de interacciones (memorias episódicas)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM memories WHERE memory_type = 'episodic';")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+    def average_feedback_score(self) -> float:
+        """Calcula el promedio de rating en interaction_feedback. Devuelve 0.0 si no existen registros."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT AVG(rating) FROM interaction_feedback;")
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return float(row[0])
+        return 0.0
+
+    # ----------------------------------------------------
+    # Operaciones de Consolidación de Memoria (Módulo 16)
+    # ----------------------------------------------------
+    def count_memory_types(self) -> dict:
+        """Devuelve un diccionario con la cantidad de memorias por tipo {memory_type: count}."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT memory_type, COUNT(*) FROM memories GROUP BY memory_type;")
+        rows = cursor.fetchall()
+        return {row[0]: row[1] for row in rows} if rows else {}
+
+    def get_average_memory_importance(self) -> float:
+        """Calcula el promedio del campo importance para todas las memorias. Devuelve 0.0 si no hay registros."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT AVG(importance) FROM memories;")
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return float(row[0])
+        return 0.0
+
+    # ----------------------------------------------------
+    # Operaciones de Auditoría de Memoria (Módulo 17)
+    # ----------------------------------------------------
+    def get_all_memories_for_audit(self) -> list[dict]:
+        """Recupera todas las memorias registradas para su auditoría de integridad."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM memories ORDER BY id ASC;")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones de Auditoría de Mantenimiento (Módulo 23)
+    # ----------------------------------------------------
+    def insert_audit_event(
+        self, event_type: str, source_layer: str, description: str, status: str, created_at: Optional[str] = None
+    ) -> int:
+        """Inserta un evento de auditoría de mantenimiento y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_audit_events (event_type, source_layer, description, status)
+                VALUES (?, ?, ?, ?);
+                """,
+                (event_type, source_layer, description, status)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_audit_events (event_type, source_layer, description, status, created_at)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (event_type, source_layer, description, status, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_audit_event(self, event_id: int) -> Optional[dict]:
+        """Obtiene un evento de auditoría por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM maintenance_audit_events WHERE id = ?;",
+            (event_id,)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_all_audit_events(self) -> list[dict]:
+        """Obtiene todos los eventos de auditoría ordenados cronológicamente (id ASC)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM maintenance_audit_events ORDER BY id ASC;")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Maintenance Outcome Evaluation Layer (Módulo 24)
+    # ----------------------------------------------------
+    def insert_outcome_evaluation(
+        self,
+        event_id: int,
+        result_type: str,
+        score: float,
+        summary: str,
+        created_at: Optional[str] = None
+    ) -> int:
+        """Inserta una evaluación de resultado de mantenimiento y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_outcome_evaluations (event_id, result_type, score, summary)
+                VALUES (?, ?, ?, ?);
+                """,
+                (event_id, result_type, score, summary)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_outcome_evaluations (event_id, result_type, score, summary, created_at)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (event_id, result_type, score, summary, created_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_outcome_evaluation(self, evaluation_id: int) -> Optional[dict]:
+        """Obtiene una evaluación de resultado por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM maintenance_outcome_evaluations WHERE id = ?;",
+            (evaluation_id,)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_outcomes_by_event(self, event_id: int) -> list[dict]:
+        """Obtiene todas las evaluaciones asociadas a un evento de auditoría específico."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM maintenance_outcome_evaluations WHERE event_id = ? ORDER BY id ASC;",
+            (event_id,)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def get_all_outcome_evaluations(self) -> list[dict]:
+        """Obtiene todas las evaluaciones de resultado ordenadas cronológicamente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM maintenance_outcome_evaluations ORDER BY id ASC;")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Consultas analíticas para Maintenance Intelligence Layer (Módulo 25)
+    # ----------------------------------------------------
+    def count_outcome_events(self) -> int:
+        """Cuenta el número total de evaluaciones de resultado registradas."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM maintenance_outcome_evaluations;")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+    def count_outcomes_by_type(self) -> dict:
+        """Devuelve el conteo de evaluaciones agrupado por result_type."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT result_type, COUNT(*) FROM maintenance_outcome_evaluations GROUP BY result_type;"
+        )
+        rows = cursor.fetchall()
+        result = {}
+        for r_type, count in rows:
+            if r_type:
+                result[r_type] = count
+        return result
+
+    def average_outcome_score(self) -> float:
+        """Calcula el promedio del score de las evaluaciones de resultado."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT AVG(score) FROM maintenance_outcome_evaluations;")
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return round(float(row[0]), 4)
+        return 0.0
+
+    def get_outcome_distribution(self) -> dict:
+        """Obtiene la distribución general de los resultados de mantenimiento."""
+        total = self.count_outcome_events()
+        by_type = self.count_outcomes_by_type()
+        avg_score = self.average_outcome_score()
+        return {
+            "total_events": total,
+            "by_type": by_type,
+            "average_score": avg_score,
+        }
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Strategy Evaluation Layer (Módulo 27)
+    # ----------------------------------------------------
+    def insert_strategy_evaluation(
+        self,
+        strategy_id: Any,
+        quality_score: float = 0.0,
+        impact_score: float = 0.0,
+        confidence_score: float = 0.0,
+        summary: str = "",
+        created_at: Optional[str] = None
+    ) -> int:
+        """Inserta una evaluación de estrategia en strategy_evaluations y devuelve el ID generado."""
+        if isinstance(strategy_id, dict):
+            data = strategy_id
+            s_id = data.get("strategy_id", "strategy_001")
+            q_score = data.get("quality_score", 0.0)
+            i_score = data.get("impact_score", 0.0)
+            c_score = data.get("confidence_score", 0.0)
+            sum_text = data.get("summary", "")
+            c_at = data.get("created_at")
+        else:
+            s_id = strategy_id
+            q_score = quality_score
+            i_score = impact_score
+            c_score = confidence_score
+            sum_text = summary
+            c_at = created_at
+
+        conn = self.connect()
+        cursor = conn.cursor()
+        if c_at:
+            cursor.execute(
+                """
+                INSERT INTO strategy_evaluations (strategy_id, quality_score, impact_score, confidence_score, summary, created_at)
+                VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (str(s_id), float(q_score), float(i_score), float(c_score), str(sum_text), str(c_at))
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO strategy_evaluations (strategy_id, quality_score, impact_score, confidence_score, summary)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (str(s_id), float(q_score), float(i_score), float(c_score), str(sum_text))
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_strategy_evaluation(self, eval_id: int) -> Optional[dict]:
+        """Obtiene una evaluación de estrategia por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, strategy_id, quality_score, impact_score, confidence_score, summary, created_at FROM strategy_evaluations WHERE id = ?;",
+            (eval_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "strategy_id": row["strategy_id"],
+                "quality_score": row["quality_score"],
+                "impact_score": row["impact_score"],
+                "confidence_score": row["confidence_score"],
+                "summary": row["summary"],
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_strategy_evaluations(self) -> list:
+        """Obtiene todas las evaluaciones de estrategia ordenadas por id descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, strategy_id, quality_score, impact_score, confidence_score, summary, created_at FROM strategy_evaluations ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "strategy_id": row["strategy_id"],
+                "quality_score": row["quality_score"],
+                "impact_score": row["impact_score"],
+                "confidence_score": row["confidence_score"],
+                "summary": row["summary"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    def count_strategy_evaluations(self) -> int:
+        """Cuenta el total de evaluaciones registradas."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM strategy_evaluations;")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+    def average_strategy_quality(self) -> float:
+        """Calcula el promedio de quality_score de las evaluaciones estratégicas."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT AVG(quality_score) FROM strategy_evaluations;")
+        row = cursor.fetchone()
+        return round(float(row[0]), 4) if (row and row[0] is not None) else 0.0
+
+    def average_strategy_impact(self) -> float:
+        """Calcula el promedio de impact_score de las evaluaciones estratégicas."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT AVG(impact_score) FROM strategy_evaluations;")
+        row = cursor.fetchone()
+        return round(float(row[0]), 4) if (row and row[0] is not None) else 0.0
+
+    def average_strategy_confidence(self) -> float:
+        """Calcula el promedio de confidence_score de las evaluaciones estratégicas."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT AVG(confidence_score) FROM strategy_evaluations;")
+        row = cursor.fetchone()
+        return round(float(row[0]), 4) if (row and row[0] is not None) else 0.0
+
+    def get_best_strategy_type(self) -> Optional[str]:
+        """Obtiene el tipo o identificador de estrategia con la mayor puntuación de calidad (quality_score)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT strategy_id FROM strategy_evaluations ORDER BY quality_score DESC, id DESC LIMIT 1;"
+        )
+        row = cursor.fetchone()
+        if row and row["strategy_id"]:
+            s_id = str(row["strategy_id"])
+            s_lower = s_id.lower()
+            if "immediate" in s_lower:
+                return "immediate"
+            elif "soon" in s_lower:
+                return "soon"
+            elif "planned" in s_lower:
+                return "planned"
+            elif "deferred" in s_lower:
+                return "deferred"
+            return s_id
+        return None
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Adaptive Recommendation Layer (Módulo 29)
+    # ----------------------------------------------------
+    def insert_adaptive_recommendation(
+        self,
+        strategy_type: Any,
+        recommended_action: Optional[str] = None,
+        confidence: Optional[float] = None,
+        reason: Optional[str] = None,
+        based_on_history: Optional[bool] = None,
+        created_at: Optional[Any] = None,
+    ) -> int:
+        """Inserta una recomendación adaptativa en la tabla adaptive_recommendations."""
+        if hasattr(strategy_type, "strategy_type"):
+            rec = strategy_type
+            s_type = str(rec.strategy_type)
+            r_act = str(rec.recommended_action)
+            conf = float(rec.confidence)
+            reas = str(rec.reason)
+            b_hist = 1 if rec.based_on_history else 0
+            c_at = rec.created_at.isoformat() if hasattr(rec.created_at, "isoformat") else str(rec.created_at)
+        elif isinstance(strategy_type, dict):
+            s_type = str(strategy_type.get("strategy_type", "unknown"))
+            r_act = str(strategy_type.get("recommended_action", ""))
+            conf = float(strategy_type.get("confidence", 0.0))
+            reas = str(strategy_type.get("reason", ""))
+            b_hist = 1 if strategy_type.get("based_on_history") else 0
+            c_at = str(strategy_type.get("created_at")) if strategy_type.get("created_at") else None
+        else:
+            s_type = str(strategy_type)
+            r_act = str(recommended_action or "")
+            conf = float(confidence or 0.0)
+            reas = str(reason or "")
+            b_hist = 1 if based_on_history else 0
+            c_at = str(created_at) if created_at else None
+
+        conn = self.connect()
+        cursor = conn.cursor()
+        if c_at is None:
+            cursor.execute(
+                """
+                INSERT INTO adaptive_recommendations (strategy_type, recommended_action, confidence, reason, based_on_history)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (s_type, r_act, conf, reas, b_hist)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO adaptive_recommendations (strategy_type, recommended_action, confidence, reason, based_on_history, created_at)
+                VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (s_type, r_act, conf, reas, b_hist, c_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_adaptive_recommendation(self, rec_id: int) -> Optional[dict]:
+        """Obtiene una recomendación adaptativa por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, strategy_type, recommended_action, confidence, reason, based_on_history, created_at FROM adaptive_recommendations WHERE id = ?;",
+            (rec_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "strategy_type": row["strategy_type"],
+                "recommended_action": row["recommended_action"],
+                "confidence": row["confidence"],
+                "reason": row["reason"],
+                "based_on_history": bool(row["based_on_history"]),
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_adaptive_recommendations(self) -> list:
+        """Obtiene todas las recomendaciones adaptativas ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, strategy_type, recommended_action, confidence, reason, based_on_history, created_at FROM adaptive_recommendations ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "strategy_type": row["strategy_type"],
+                "recommended_action": row["recommended_action"],
+                "confidence": row["confidence"],
+                "reason": row["reason"],
+                "based_on_history": bool(row["based_on_history"]),
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Maintenance Decision Intelligence Layer (Módulo 30)
+    # ----------------------------------------------------
+    def insert_maintenance_decision(
+        self,
+        decision_type: Any,
+        selected_strategy: Optional[str] = None,
+        confidence: Optional[float] = None,
+        reasoning: Optional[str] = None,
+        supporting_factors: Optional[Any] = None,
+        created_at: Optional[Any] = None,
+    ) -> int:
+        """Inserta una decisión de mantenimiento en la tabla maintenance_decisions."""
+        if hasattr(decision_type, "decision_type"):
+            dec = decision_type
+            d_type = str(dec.decision_type)
+            s_strat = str(dec.selected_strategy)
+            conf = float(dec.confidence)
+            reas = str(dec.reasoning)
+            s_fact = json.dumps(dec.supporting_factors) if isinstance(dec.supporting_factors, list) else str(dec.supporting_factors or "[]")
+            c_at = dec.created_at.isoformat() if hasattr(dec.created_at, "isoformat") else str(dec.created_at)
+        elif isinstance(decision_type, dict):
+            d_type = str(decision_type.get("decision_type", "default"))
+            s_strat = str(decision_type.get("selected_strategy", "unknown"))
+            conf = float(decision_type.get("confidence", 0.0))
+            reas = str(decision_type.get("reasoning", ""))
+            raw_factors = decision_type.get("supporting_factors", [])
+            s_fact = json.dumps(raw_factors) if isinstance(raw_factors, list) else str(raw_factors or "[]")
+            c_at = str(decision_type.get("created_at")) if decision_type.get("created_at") else None
+        else:
+            d_type = str(decision_type)
+            s_strat = str(selected_strategy or "unknown")
+            conf = float(confidence or 0.0)
+            reas = str(reasoning or "")
+            s_fact = json.dumps(supporting_factors) if isinstance(supporting_factors, list) else str(supporting_factors or "[]")
+            c_at = str(created_at) if created_at else None
+
+        conn = self.connect()
+        cursor = conn.cursor()
+        if c_at is None:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_decisions (decision_type, selected_strategy, confidence, reasoning, supporting_factors)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (d_type, s_strat, conf, reas, s_fact)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_decisions (decision_type, selected_strategy, confidence, reasoning, supporting_factors, created_at)
+                VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (d_type, s_strat, conf, reas, s_fact, c_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_maintenance_decision(self, dec_id: int) -> Optional[dict]:
+        """Obtiene una decisión de mantenimiento por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, decision_type, selected_strategy, confidence, reasoning, supporting_factors, created_at FROM maintenance_decisions WHERE id = ?;",
+            (dec_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            raw_factors = row["supporting_factors"]
+            try:
+                factors_list = json.loads(raw_factors) if raw_factors else []
+            except Exception:
+                factors_list = [raw_factors] if raw_factors else []
+            return {
+                "id": row["id"],
+                "decision_type": row["decision_type"],
+                "selected_strategy": row["selected_strategy"],
+                "confidence": row["confidence"],
+                "reasoning": row["reasoning"],
+                "supporting_factors": factors_list,
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_maintenance_decisions(self) -> list:
+        """Obtiene todas las decisiones de mantenimiento ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, decision_type, selected_strategy, confidence, reasoning, supporting_factors, created_at FROM maintenance_decisions ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            raw_factors = row["supporting_factors"]
+            try:
+                factors_list = json.loads(raw_factors) if raw_factors else []
+            except Exception:
+                factors_list = [raw_factors] if raw_factors else []
+            result.append({
+                "id": row["id"],
+                "decision_type": row["decision_type"],
+                "selected_strategy": row["selected_strategy"],
+                "confidence": row["confidence"],
+                "reasoning": row["reasoning"],
+                "supporting_factors": factors_list,
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Maintenance Execution Planning Layer (Módulo 31)
+    # ----------------------------------------------------
+    def insert_execution_plan(
+        self,
+        decision_type: Any,
+        strategy_type: Optional[str] = None,
+        execution_steps: Optional[Any] = None,
+        risk_level: Optional[str] = None,
+        estimated_duration: Optional[str] = None,
+        requires_approval: Optional[bool] = None,
+        reasoning: Optional[str] = None,
+        created_at: Optional[Any] = None,
+    ) -> int:
+        """Inserta un plan de ejecución de mantenimiento en la tabla maintenance_execution_plans."""
+        if hasattr(decision_type, "decision_type"):
+            plan = decision_type
+            d_type = str(plan.decision_type)
+            s_type = str(plan.strategy_type)
+            steps = json.dumps(plan.execution_steps) if isinstance(plan.execution_steps, list) else str(plan.execution_steps or "[]")
+            r_level = str(plan.risk_level)
+            e_dur = str(plan.estimated_duration)
+            req_app = 1 if getattr(plan, "requires_approval", False) else 0
+            reas = str(getattr(plan, "reasoning", ""))
+            c_at = plan.created_at.isoformat() if hasattr(plan.created_at, "isoformat") else str(plan.created_at)
+        elif isinstance(decision_type, dict):
+            d_type = str(decision_type.get("decision_type", "default"))
+            s_type = str(decision_type.get("strategy_type", "unknown"))
+            raw_steps = decision_type.get("execution_steps", [])
+            steps = json.dumps(raw_steps) if isinstance(raw_steps, list) else str(raw_steps or "[]")
+            r_level = str(decision_type.get("risk_level", "low"))
+            e_dur = str(decision_type.get("estimated_duration", "0m"))
+            req_app = 1 if decision_type.get("requires_approval") else 0
+            reas = str(decision_type.get("reasoning", ""))
+            c_at = str(decision_type.get("created_at")) if decision_type.get("created_at") else None
+        else:
+            d_type = str(decision_type)
+            s_type = str(strategy_type or "unknown")
+            steps = json.dumps(execution_steps) if isinstance(execution_steps, list) else str(execution_steps or "[]")
+            r_level = str(risk_level or "low")
+            e_dur = str(estimated_duration or "0m")
+            req_app = 1 if requires_approval else 0
+            reas = str(reasoning or "")
+            c_at = str(created_at) if created_at else None
+
+        conn = self.connect()
+        cursor = conn.cursor()
+        if c_at is None:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_execution_plans (decision_type, strategy_type, execution_steps, risk_level, estimated_duration, requires_approval, reasoning)
+                VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
+                (d_type, s_type, steps, r_level, e_dur, req_app, reas)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO maintenance_execution_plans (decision_type, strategy_type, execution_steps, risk_level, estimated_duration, requires_approval, reasoning, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (d_type, s_type, steps, r_level, e_dur, req_app, reas, c_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_execution_plan(self, plan_id: int) -> Optional[dict]:
+        """Obtiene un plan de ejecución por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, decision_type, strategy_type, execution_steps, risk_level, estimated_duration, requires_approval, reasoning, created_at FROM maintenance_execution_plans WHERE id = ?;",
+            (plan_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            raw_steps = row["execution_steps"]
+            try:
+                steps_list = json.loads(raw_steps) if raw_steps else []
+            except Exception:
+                steps_list = [raw_steps] if raw_steps else []
+            return {
+                "id": row["id"],
+                "decision_type": row["decision_type"],
+                "strategy_type": row["strategy_type"],
+                "execution_steps": steps_list,
+                "risk_level": row["risk_level"],
+                "estimated_duration": row["estimated_duration"],
+                "requires_approval": bool(row["requires_approval"]),
+                "reasoning": row["reasoning"],
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_execution_plans(self) -> list:
+        """Obtiene todos los planes de ejecución ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, decision_type, strategy_type, execution_steps, risk_level, estimated_duration, requires_approval, reasoning, created_at FROM maintenance_execution_plans ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            raw_steps = row["execution_steps"]
+            try:
+                steps_list = json.loads(raw_steps) if raw_steps else []
+            except Exception:
+                steps_list = [raw_steps] if raw_steps else []
+            result.append({
+                "id": row["id"],
+                "decision_type": row["decision_type"],
+                "strategy_type": row["strategy_type"],
+                "execution_steps": steps_list,
+                "risk_level": row["risk_level"],
+                "estimated_duration": row["estimated_duration"],
+                "requires_approval": bool(row["requires_approval"]),
+                "reasoning": row["reasoning"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Execution Validation Reports (Módulo 32)
+    # ----------------------------------------------------
+    def insert_validation_report(
+        self,
+        report: Any = None,
+        plan_id: Optional[int] = None,
+        valid: Optional[bool] = None,
+        risk_level: Optional[str] = None,
+        issues: Optional[Any] = None,
+        recommendation: Optional[str] = None,
+        created_at: Optional[Any] = None,
+    ) -> int:
+        """Inserta un reporte de validación de ejecución en la tabla execution_validation_reports."""
+        if hasattr(report, "plan_id"):
+            p_id = int(report.plan_id)
+            v_val = 1 if report.valid else 0
+            r_level = str(report.risk_level)
+            iss = json.dumps(report.issues) if isinstance(report.issues, list) else str(report.issues or "[]")
+            recom = str(report.recommendation)
+            c_at = report.created_at.isoformat() if hasattr(report.created_at, "isoformat") else str(report.created_at)
+        elif isinstance(report, dict):
+            p_id = int(report.get("plan_id", 0))
+            v_val = 1 if report.get("valid") else 0
+            r_level = str(report.get("risk_level", "low"))
+            raw_issues = report.get("issues", [])
+            iss = json.dumps(raw_issues) if isinstance(raw_issues, list) else str(raw_issues or "[]")
+            recom = str(report.get("recommendation", ""))
+            c_at = str(report.get("created_at")) if report.get("created_at") else None
+        else:
+            p_id = int(plan_id or 0)
+            v_val = 1 if valid else 0
+            r_level = str(risk_level or "low")
+            iss = json.dumps(issues) if isinstance(issues, list) else str(issues or "[]")
+            recom = str(recommendation or "")
+            c_at = str(created_at) if created_at else None
+
+        conn = self.connect()
+        cursor = conn.cursor()
+        if c_at is None:
+            cursor.execute(
+                """
+                INSERT INTO execution_validation_reports (plan_id, valid, risk_level, issues, recommendation)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (p_id, v_val, r_level, iss, recom)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO execution_validation_reports (plan_id, valid, risk_level, issues, recommendation, created_at)
+                VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (p_id, v_val, r_level, iss, recom, c_at)
+            )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_validation_report(self, report_id: int) -> Optional[dict]:
+        """Obtiene un reporte de validación por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, plan_id, valid, risk_level, issues, recommendation, created_at FROM execution_validation_reports WHERE id = ?;",
+            (report_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            raw_issues = row["issues"]
+            try:
+                issues_list = json.loads(raw_issues) if raw_issues else []
+            except Exception:
+                issues_list = [raw_issues] if raw_issues else []
+            return {
+                "id": row["id"],
+                "plan_id": row["plan_id"],
+                "valid": bool(row["valid"]),
+                "risk_level": row["risk_level"],
+                "issues": issues_list,
+                "recommendation": row["recommendation"],
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_validation_reports(self) -> list:
+        """Obtiene todos los reportes de validación ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, plan_id, valid, risk_level, issues, recommendation, created_at FROM execution_validation_reports ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            raw_issues = row["issues"]
+            try:
+                issues_list = json.loads(raw_issues) if raw_issues else []
+            except Exception:
+                issues_list = [raw_issues] if raw_issues else []
+            result.append({
+                "id": row["id"],
+                "plan_id": row["plan_id"],
+                "valid": bool(row["valid"]),
+                "risk_level": row["risk_level"],
+                "issues": issues_list,
+                "recommendation": row["recommendation"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # Operaciones para Execution Approval Layer (Módulo 33)
+    # ----------------------------------------------------
+    def insert_execution_approval(self, plan_id: int, validation_id: int, approval_status: str, approved: bool, reason: str) -> int:
+        """Inserta un registro de aprobación de ejecución en la base de datos."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO execution_approvals (plan_id, validation_id, approval_status, approved, reason)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (plan_id, validation_id, approval_status, 1 if approved else 0, reason)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_execution_approval(self, approval_id: int) -> dict:
+        """Obtiene una aprobación por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, plan_id, validation_id, approval_status, approved, reason, created_at FROM execution_approvals WHERE id = ?;",
+            (approval_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "plan_id": row["plan_id"],
+                "validation_id": row["validation_id"],
+                "approval_status": row["approval_status"],
+                "approved": bool(row["approved"]),
+                "reason": row["reason"],
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_execution_approvals(self) -> list:
+        """Obtiene todas las aprobaciones ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, plan_id, validation_id, approval_status, approved, reason, created_at FROM execution_approvals ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "plan_id": row["plan_id"],
+                "validation_id": row["validation_id"],
+                "approval_status": row["approval_status"],
+                "approved": bool(row["approved"]),
+                "reason": row["reason"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Execution Tracking (Módulo 34)
+    # ----------------------------------------------------
+    def insert_execution_tracking(self, approval_id: int, status: str, progress: float, message: str = "") -> int:
+        """Inserta un registro de seguimiento de ejecución en execution_tracking."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO execution_tracking (approval_id, status, progress, message)
+            VALUES (?, ?, ?, ?);
+            """,
+            (approval_id, status, progress, message)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def insert_tracking(self, approval_id: int, status: str, progress: float, message: str = "") -> int:
+        """Alias para insert_execution_tracking."""
+        return self.insert_execution_tracking(approval_id, status, progress, message)
+
+    def update_execution_tracking(self, tracking_id: int, status: str, progress: float, message: str = "") -> bool:
+        """Actualiza el estado, progreso y mensaje de un seguimiento de ejecución."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE execution_tracking
+            SET status = ?, progress = ?, message = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?;
+            """,
+            (status, progress, message, tracking_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def update_tracking(self, tracking_id: int, status: str, progress: float, message: str = "") -> bool:
+        """Alias para update_execution_tracking."""
+        return self.update_execution_tracking(tracking_id, status, progress, message)
+
+    def get_execution_tracking(self, tracking_id: int) -> Optional[dict]:
+        """Obtiene un registro de seguimiento por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, approval_id, status, progress, message, created_at, updated_at FROM execution_tracking WHERE id = ?;",
+            (tracking_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "approval_id": row["approval_id"],
+                "status": row["status"],
+                "progress": float(row["progress"]),
+                "message": row["message"] or "",
+                "created_at": str(row["created_at"]),
+                "updated_at": str(row["updated_at"]),
+            }
+        return None
+
+    def get_tracking(self, tracking_id: int) -> Optional[dict]:
+        """Alias para get_execution_tracking."""
+        return self.get_execution_tracking(tracking_id)
+
+    def get_execution_trackings(self) -> list:
+        """Obtiene todos los registros de seguimiento ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, approval_id, status, progress, message, created_at, updated_at FROM execution_tracking ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "approval_id": row["approval_id"],
+                "status": row["status"],
+                "progress": float(row["progress"]),
+                "message": row["message"] or "",
+                "created_at": str(row["created_at"]),
+                "updated_at": str(row["updated_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Execution Result (Módulo 35)
+    # ----------------------------------------------------
+    def insert_execution_result(self, tracking_id: int, result_status: str, impact: str, summary: str = "") -> int:
+        """Inserta un resultado de ejecución en execution_results."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO execution_results (tracking_id, result_status, impact, summary)
+            VALUES (?, ?, ?, ?);
+            """,
+            (tracking_id, result_status, impact, summary)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def insert_result(self, tracking_id: int, result_status: str, impact: str, summary: str = "") -> int:
+        """Alias para insert_execution_result."""
+        return self.insert_execution_result(tracking_id, result_status, impact, summary)
+
+    def get_execution_result(self, result_id: int) -> Optional[dict]:
+        """Obtiene un resultado de ejecución por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, tracking_id, result_status, impact, summary, created_at FROM execution_results WHERE id = ?;",
+            (result_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "tracking_id": row["tracking_id"],
+                "result_status": row["result_status"],
+                "impact": row["impact"],
+                "summary": row["summary"] or "",
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_result(self, result_id: int) -> Optional[dict]:
+        """Alias para get_execution_result."""
+        return self.get_execution_result(result_id)
+
+    def get_execution_results(self) -> list:
+        """Obtiene todos los resultados de ejecución ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, tracking_id, result_status, impact, summary, created_at FROM execution_results ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "tracking_id": row["tracking_id"],
+                "result_status": row["result_status"],
+                "impact": row["impact"],
+                "summary": row["summary"] or "",
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    def get_results(self) -> list:
+        """Alias para get_execution_results."""
+        return self.get_execution_results()
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Execution Feedback (Módulo 36)
+    # ----------------------------------------------------
+    def insert_execution_feedback(self, result_id: int, feedback_type: str, quality_score: float, learning_notes: str = "") -> int:
+        """Inserta un registro de retroalimentación de ejecución en execution_feedback."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO execution_feedback (result_id, feedback_type, quality_score, learning_notes)
+            VALUES (?, ?, ?, ?);
+            """,
+            (result_id, feedback_type, quality_score, learning_notes)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def insert_feedback(self, result_id: int, feedback_type: str, quality_score: float, learning_notes: str = "") -> int:
+        """Alias para insert_execution_feedback."""
+        return self.insert_execution_feedback(result_id, feedback_type, quality_score, learning_notes)
+
+    def get_execution_feedback(self, feedback_id: int) -> Optional[dict]:
+        """Obtiene un registro de feedback por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, result_id, feedback_type, quality_score, learning_notes, created_at FROM execution_feedback WHERE id = ?;",
+            (feedback_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "result_id": row["result_id"],
+                "feedback_type": row["feedback_type"],
+                "quality_score": float(row["quality_score"]),
+                "learning_notes": row["learning_notes"] or "",
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_feedback(self, feedback_id: int) -> Optional[dict]:
+        """Alias para get_execution_feedback."""
+        return self.get_execution_feedback(feedback_id)
+
+    def get_execution_feedbacks(self) -> list:
+        """Obtiene todos los registros de feedback ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, result_id, feedback_type, quality_score, learning_notes, created_at FROM execution_feedback ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "result_id": row["result_id"],
+                "feedback_type": row["feedback_type"],
+                "quality_score": float(row["quality_score"]),
+                "learning_notes": row["learning_notes"] or "",
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    def get_feedbacks(self) -> list:
+        """Alias para get_execution_feedbacks."""
+        return self.get_execution_feedbacks()
+
+    # ----------------------------------------------------
+    # MÓDULO 37: Maintenance Knowledge CRUD
+    # ----------------------------------------------------
+    def insert_knowledge(
+        self,
+        source_feedback_id: int,
+        knowledge_type: str,
+        description: str,
+        confidence: float,
+    ) -> int:
+        """Inserta un registro de conocimiento extraído de mantenimiento."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO maintenance_knowledge (source_feedback_id, knowledge_type, description, confidence)
+            VALUES (?, ?, ?, ?);
+            """,
+            (source_feedback_id, knowledge_type, description, confidence),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_knowledge(self, knowledge_id: int) -> Optional[dict]:
+        """Obtiene un registro de conocimiento por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, source_feedback_id, knowledge_type, description, confidence, created_at FROM maintenance_knowledge WHERE id = ?;",
+            (knowledge_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "source_feedback_id": row["source_feedback_id"],
+                "knowledge_type": row["knowledge_type"],
+                "description": row["description"] or "",
+                "confidence": float(row["confidence"]),
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_all_knowledge(self) -> list:
+        """Obtiene todo el conocimiento extraído ordenado por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, source_feedback_id, knowledge_type, description, confidence, created_at FROM maintenance_knowledge ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "source_feedback_id": row["source_feedback_id"],
+                "knowledge_type": row["knowledge_type"],
+                "description": row["description"] or "",
+                "confidence": float(row["confidence"]),
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # MÓDULO 38: Maintenance Patterns CRUD
+    # ----------------------------------------------------
+    def insert_pattern(
+        self,
+        pattern_type: str,
+        occurrences: int,
+        confidence: float,
+        description: str,
+    ) -> int:
+        """Inserta un registro de patrón de mantenimiento detectado."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO maintenance_patterns (pattern_type, occurrences, confidence, description)
+            VALUES (?, ?, ?, ?);
+            """,
+            (pattern_type, occurrences, confidence, description),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_pattern(self, pattern_id: int) -> Optional[dict]:
+        """Obtiene un patrón de mantenimiento por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, pattern_type, occurrences, confidence, description, created_at FROM maintenance_patterns WHERE id = ?;",
+            (pattern_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "pattern_type": row["pattern_type"],
+                "occurrences": row["occurrences"],
+                "confidence": float(row["confidence"]),
+                "description": row["description"] or "",
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_patterns(self) -> list:
+        """Obtiene todos los patrones detectados ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, pattern_type, occurrences, confidence, description, created_at FROM maintenance_patterns ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "pattern_type": row["pattern_type"],
+                "occurrences": row["occurrences"],
+                "confidence": float(row["confidence"]),
+                "description": row["description"] or "",
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # MÓDULO 39: Maintenance Improvements CRUD
+    # ----------------------------------------------------
+    def insert_improvement(
+        self,
+        pattern_id: int,
+        recommendation_type: str,
+        priority: str,
+        description: str,
+        confidence: float,
+    ) -> int:
+        """Inserta una recomendación de mejora continua."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO maintenance_improvements (pattern_id, recommendation_type, priority, description, confidence)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (pattern_id, recommendation_type, priority, description, confidence),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_improvement(self, improvement_id: int) -> Optional[dict]:
+        """Obtiene una recomendación de mejora por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, pattern_id, recommendation_type, priority, description, confidence, created_at FROM maintenance_improvements WHERE id = ?;",
+            (improvement_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "pattern_id": row["pattern_id"],
+                "recommendation_type": row["recommendation_type"],
+                "priority": row["priority"],
+                "description": row["description"] or "",
+                "confidence": float(row["confidence"]),
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_improvements(self) -> list:
+        """Obtiene todas las recomendaciones de mejora ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, pattern_id, recommendation_type, priority, description, confidence, created_at FROM maintenance_improvements ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "pattern_id": row["pattern_id"],
+                "recommendation_type": row["recommendation_type"],
+                "priority": row["priority"],
+                "description": row["description"] or "",
+                "confidence": float(row["confidence"]),
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # MÓDULO 40: Maintenance Correlations CRUD
+    # ----------------------------------------------------
+    def insert_correlation(
+        self,
+        strategy_type: str,
+        pattern_type: str,
+        success_rate: float,
+        sample_size: int,
+        confidence: float,
+        description: str,
+    ) -> int:
+        """Inserta un registro de correlación de inteligencia de mantenimiento."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO maintenance_correlations (strategy_type, pattern_type, success_rate, sample_size, confidence, description)
+            VALUES (?, ?, ?, ?, ?, ?);
+            """,
+            (strategy_type, pattern_type, success_rate, sample_size, confidence, description),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_correlation(self, correlation_id: int) -> Optional[dict]:
+        """Obtiene un registro de correlación por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, strategy_type, pattern_type, success_rate, sample_size, confidence, description, created_at FROM maintenance_correlations WHERE id = ?;",
+            (correlation_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "strategy_type": row["strategy_type"],
+                "pattern_type": row["pattern_type"],
+                "success_rate": float(row["success_rate"]),
+                "sample_size": int(row["sample_size"]),
+                "confidence": float(row["confidence"]),
+                "description": row["description"] or "",
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_correlations(self) -> list:
+        """Obtiene todas las correlaciones ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, strategy_type, pattern_type, success_rate, sample_size, confidence, description, created_at FROM maintenance_correlations ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "strategy_type": row["strategy_type"],
+                "pattern_type": row["pattern_type"],
+                "success_rate": float(row["success_rate"]),
+                "sample_size": int(row["sample_size"]),
+                "confidence": float(row["confidence"]),
+                "description": row["description"] or "",
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # MÓDULO 41: Adaptive Decisions CRUD
+    # ----------------------------------------------------
+    def insert_adaptive_decision(
+        self,
+        correlation_id: int,
+        decision_type: str,
+        recommended_strategy: str,
+        confidence: float,
+        reasoning: str,
+    ) -> int:
+        """Inserta un registro de decisión adaptativa de mantenimiento."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO adaptive_decisions (correlation_id, decision_type, recommended_strategy, confidence, reasoning)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (correlation_id, decision_type, recommended_strategy, confidence, reasoning),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_adaptive_decision(self, decision_id: int) -> Optional[dict]:
+        """Obtiene un registro de decisión adaptativa por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, correlation_id, decision_type, recommended_strategy, confidence, reasoning, created_at FROM adaptive_decisions WHERE id = ?;",
+            (decision_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "correlation_id": row["correlation_id"],
+                "decision_type": row["decision_type"],
+                "recommended_strategy": row["recommended_strategy"],
+                "confidence": float(row["confidence"]),
+                "reasoning": row["reasoning"] or "",
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_adaptive_decisions(self) -> list:
+        """Obtiene todas las decisiones adaptativas ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, correlation_id, decision_type, recommended_strategy, confidence, reasoning, created_at FROM adaptive_decisions ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "correlation_id": row["correlation_id"],
+                "decision_type": row["decision_type"],
+                "recommended_strategy": row["recommended_strategy"],
+                "confidence": float(row["confidence"]),
+                "reasoning": row["reasoning"] or "",
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # MÓDULO 42: Optimization Feedback CRUD
+    # ----------------------------------------------------
+    def insert_optimization_feedback(
+        self,
+        decision_id: int,
+        previous_confidence: float,
+        new_confidence: float,
+        improvement_score: float,
+        optimization_type: str,
+        summary: str,
+    ) -> int:
+        """Inserta un registro de retroalimentación de optimización en el ciclo continuo."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO optimization_feedback (decision_id, previous_confidence, new_confidence, improvement_score, optimization_type, summary)
+            VALUES (?, ?, ?, ?, ?, ?);
+            """,
+            (decision_id, previous_confidence, new_confidence, improvement_score, optimization_type, summary),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_optimization_feedback(self, feedback_id: int) -> Optional[dict]:
+        """Obtiene un registro de retroalimentación de optimización por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, decision_id, previous_confidence, new_confidence, improvement_score, optimization_type, summary, created_at FROM optimization_feedback WHERE id = ?;",
+            (feedback_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "decision_id": row["decision_id"],
+                "previous_confidence": float(row["previous_confidence"]),
+                "new_confidence": float(row["new_confidence"]),
+                "improvement_score": float(row["improvement_score"]),
+                "optimization_type": row["optimization_type"],
+                "summary": row["summary"] or "",
+                "created_at": str(row["created_at"]),
+            }
+        return None
+
+    def get_optimization_history(self) -> list:
+        """Obtiene todo el historial de retroalimentación de optimización ordenado por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, decision_id, previous_confidence, new_confidence, improvement_score, optimization_type, summary, created_at FROM optimization_feedback ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "decision_id": row["decision_id"],
+                "previous_confidence": float(row["previous_confidence"]),
+                "new_confidence": float(row["new_confidence"]),
+                "improvement_score": float(row["improvement_score"]),
+                "optimization_type": row["optimization_type"],
+                "summary": row["summary"] or "",
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+
+    def close(self) -> None:
+        """Cierra la conexión activa con la base de datos."""
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
