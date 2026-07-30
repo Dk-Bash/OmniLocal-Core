@@ -452,6 +452,48 @@ class SQLiteManager:
             );
         """)
 
+        # 34. Tabla maintenance_governance_evaluations (Módulo 49)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_governance_evaluations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                decision_id INTEGER NOT NULL,
+                governance_status TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                rules_checked TEXT NOT NULL,
+                reasoning TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (decision_id) REFERENCES maintenance_supervisor_decisions(id) ON DELETE CASCADE
+            );
+        """)
+
+        # 35. Tabla maintenance_compliance_reports (Módulo 50)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_compliance_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                governance_id INTEGER NOT NULL,
+                compliant INTEGER NOT NULL,
+                violations TEXT NOT NULL,
+                compliance_score REAL NOT NULL DEFAULT 0.0,
+                recommendation TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (governance_id) REFERENCES maintenance_governance_evaluations(id) ON DELETE CASCADE
+            );
+        """)
+
+        # 36. Tabla maintenance_control_optimizations (Módulo 51)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_control_optimizations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                compliance_id INTEGER NOT NULL,
+                optimization_status TEXT NOT NULL,
+                improvement_area TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.0,
+                recommendation TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (compliance_id) REFERENCES maintenance_compliance_reports(id) ON DELETE CASCADE
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -2682,6 +2724,201 @@ class SQLiteManager:
                 "recommended_action": row["recommended_action"],
                 "priority": row["priority"],
                 "reasoning": row["reasoning"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # --- Métodos Módulo 49: Maintenance Governance ---
+
+    def insert_governance_evaluation(
+        self,
+        decision_id: int,
+        governance_status: str,
+        risk_level: str,
+        rules_checked: str,
+        reasoning: str,
+    ) -> int:
+        """Inserta una evaluación de gobernanza de mantenimiento."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO maintenance_governance_evaluations (decision_id, governance_status, risk_level, rules_checked, reasoning)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (decision_id, governance_status, risk_level, rules_checked, reasoning),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_governance_evaluation(self, evaluation_id: int) -> Optional[dict]:
+        """Obtiene una evaluación de gobernanza por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, decision_id, governance_status, risk_level, rules_checked, reasoning, created_at FROM maintenance_governance_evaluations WHERE id = ?;",
+            (evaluation_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "decision_id": row["decision_id"],
+            "governance_status": row["governance_status"],
+            "risk_level": row["risk_level"],
+            "rules_checked": row["rules_checked"],
+            "reasoning": row["reasoning"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def get_governance_evaluations(self) -> list:
+        """Obtiene todas las evaluaciones de gobernanza."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, decision_id, governance_status, risk_level, rules_checked, reasoning, created_at FROM maintenance_governance_evaluations ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "decision_id": row["decision_id"],
+                "governance_status": row["governance_status"],
+                "risk_level": row["risk_level"],
+                "rules_checked": row["rules_checked"],
+                "reasoning": row["reasoning"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # --- Métodos Módulo 50: Maintenance Compliance ---
+
+    def insert_compliance_report(
+        self,
+        governance_id: int,
+        compliant: bool,
+        violations: str,
+        compliance_score: float,
+        recommendation: str,
+    ) -> int:
+        """Inserta un informe de cumplimiento normativo."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO maintenance_compliance_reports (governance_id, compliant, violations, compliance_score, recommendation)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (governance_id, 1 if compliant else 0, violations, float(compliance_score), recommendation),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_compliance_report(self, report_id: int) -> Optional[dict]:
+        """Obtiene un informe de cumplimiento por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, governance_id, compliant, violations, compliance_score, recommendation, created_at FROM maintenance_compliance_reports WHERE id = ?;",
+            (report_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "governance_id": row["governance_id"],
+            "compliant": bool(row["compliant"]),
+            "violations": row["violations"],
+            "compliance_score": float(row["compliance_score"]),
+            "recommendation": row["recommendation"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def get_compliance_reports(self) -> list:
+        """Obtiene todos los informes de cumplimiento."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, governance_id, compliant, violations, compliance_score, recommendation, created_at FROM maintenance_compliance_reports ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "governance_id": row["governance_id"],
+                "compliant": bool(row["compliant"]),
+                "violations": row["violations"],
+                "compliance_score": float(row["compliance_score"]),
+                "recommendation": row["recommendation"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # --- Métodos Módulo 51: Autonomous Control Optimization ---
+
+    def insert_control_optimization(
+        self,
+        compliance_id: int,
+        optimization_status: str,
+        improvement_area: str,
+        confidence: float,
+        recommendation: str,
+    ) -> int:
+        """Inserta un reporte de optimización de control autónomo."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO maintenance_control_optimizations (compliance_id, optimization_status, improvement_area, confidence, recommendation)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (compliance_id, optimization_status, improvement_area, float(confidence), recommendation),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_control_optimization(self, optimization_id: int) -> Optional[dict]:
+        """Obtiene un reporte de optimización de control por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, compliance_id, optimization_status, improvement_area, confidence, recommendation, created_at FROM maintenance_control_optimizations WHERE id = ?;",
+            (optimization_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "compliance_id": row["compliance_id"],
+            "optimization_status": row["optimization_status"],
+            "improvement_area": row["improvement_area"],
+            "confidence": float(row["confidence"]),
+            "recommendation": row["recommendation"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def get_control_optimizations(self) -> list:
+        """Obtiene todos los reportes de optimización de control."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, compliance_id, optimization_status, improvement_area, confidence, recommendation, created_at FROM maintenance_control_optimizations ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "compliance_id": row["compliance_id"],
+                "optimization_status": row["optimization_status"],
+                "improvement_area": row["improvement_area"],
+                "confidence": float(row["confidence"]),
+                "recommendation": row["recommendation"],
                 "created_at": str(row["created_at"]),
             })
         return result
