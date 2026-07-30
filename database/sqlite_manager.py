@@ -410,6 +410,48 @@ class SQLiteManager:
             );
         """)
 
+        # 31. Tabla maintenance_monitoring_reports (Módulo 46)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_monitoring_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workflow_id INTEGER NOT NULL,
+                execution_status TEXT NOT NULL,
+                health_status TEXT NOT NULL,
+                progress REAL NOT NULL DEFAULT 0.0,
+                observations TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (workflow_id) REFERENCES maintenance_workflows(id) ON DELETE CASCADE
+            );
+        """)
+
+        # 32. Tabla maintenance_alerts (Módulo 47)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                monitoring_id INTEGER NOT NULL,
+                alert_type TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                message TEXT NOT NULL,
+                recommended_action TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (monitoring_id) REFERENCES maintenance_monitoring_reports(id) ON DELETE CASCADE
+            );
+        """)
+
+        # 33. Tabla maintenance_supervisor_decisions (Módulo 48)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance_supervisor_decisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                alert_id INTEGER NOT NULL,
+                decision_type TEXT NOT NULL,
+                recommended_action TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                reasoning TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (alert_id) REFERENCES maintenance_alerts(id) ON DELETE CASCADE
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -2445,6 +2487,201 @@ class SQLiteManager:
                 "coordination_status": row["coordination_status"],
                 "next_action": row["next_action"],
                 "summary": row["summary"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # --- Métodos Módulo 46: Maintenance Monitoring ---
+
+    def insert_monitoring_report(
+        self,
+        workflow_id: int,
+        execution_status: str,
+        health_status: str,
+        progress: float,
+        observations: str,
+    ) -> int:
+        """Inserta un informe de monitoreo de mantenimiento."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO maintenance_monitoring_reports (workflow_id, execution_status, health_status, progress, observations)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (workflow_id, execution_status, health_status, float(progress), observations),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_monitoring_report(self, report_id: int) -> Optional[dict]:
+        """Obtiene un informe de monitoreo por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, workflow_id, execution_status, health_status, progress, observations, created_at FROM maintenance_monitoring_reports WHERE id = ?;",
+            (report_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "workflow_id": row["workflow_id"],
+            "execution_status": row["execution_status"],
+            "health_status": row["health_status"],
+            "progress": float(row["progress"]),
+            "observations": row["observations"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def get_monitoring_reports(self) -> list:
+        """Obtiene todos los informes de monitoreo."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, workflow_id, execution_status, health_status, progress, observations, created_at FROM maintenance_monitoring_reports ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "workflow_id": row["workflow_id"],
+                "execution_status": row["execution_status"],
+                "health_status": row["health_status"],
+                "progress": float(row["progress"]),
+                "observations": row["observations"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # --- Métodos Módulo 47: Maintenance Alerts ---
+
+    def insert_alert(
+        self,
+        monitoring_id: int,
+        alert_type: str,
+        severity: str,
+        message: str,
+        recommended_action: str,
+    ) -> int:
+        """Inserta una alerta inteligente de mantenimiento."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO maintenance_alerts (monitoring_id, alert_type, severity, message, recommended_action)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (monitoring_id, alert_type, severity, message, recommended_action),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_alert(self, alert_id: int) -> Optional[dict]:
+        """Obtiene una alerta por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, monitoring_id, alert_type, severity, message, recommended_action, created_at FROM maintenance_alerts WHERE id = ?;",
+            (alert_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "monitoring_id": row["monitoring_id"],
+            "alert_type": row["alert_type"],
+            "severity": row["severity"],
+            "message": row["message"],
+            "recommended_action": row["recommended_action"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def get_alerts(self) -> list:
+        """Obtiene todas las alertas de mantenimiento."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, monitoring_id, alert_type, severity, message, recommended_action, created_at FROM maintenance_alerts ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "monitoring_id": row["monitoring_id"],
+                "alert_type": row["alert_type"],
+                "severity": row["severity"],
+                "message": row["message"],
+                "recommended_action": row["recommended_action"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # --- Métodos Módulo 48: Maintenance Supervisor Decisions ---
+
+    def insert_supervisor_decision(
+        self,
+        alert_id: int,
+        decision_type: str,
+        recommended_action: str,
+        priority: str,
+        reasoning: str,
+    ) -> int:
+        """Inserta una decisión de supervisión de mantenimiento."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO maintenance_supervisor_decisions (alert_id, decision_type, recommended_action, priority, reasoning)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (alert_id, decision_type, recommended_action, priority, reasoning),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_supervisor_decision(self, decision_id: int) -> Optional[dict]:
+        """Obtiene una decisión de supervisión por ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, alert_id, decision_type, recommended_action, priority, reasoning, created_at FROM maintenance_supervisor_decisions WHERE id = ?;",
+            (decision_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "alert_id": row["alert_id"],
+            "decision_type": row["decision_type"],
+            "recommended_action": row["recommended_action"],
+            "priority": row["priority"],
+            "reasoning": row["reasoning"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def get_supervisor_decisions(self) -> list:
+        """Obtiene todas las decisiones de supervisión."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, alert_id, decision_type, recommended_action, priority, reasoning, created_at FROM maintenance_supervisor_decisions ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "alert_id": row["alert_id"],
+                "decision_type": row["decision_type"],
+                "recommended_action": row["recommended_action"],
+                "priority": row["priority"],
+                "reasoning": row["reasoning"],
                 "created_at": str(row["created_at"]),
             })
         return result
