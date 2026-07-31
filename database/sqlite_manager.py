@@ -505,6 +505,19 @@ class SQLiteManager:
             );
         """)
 
+        # 38. Tabla workflow_executions (Runtime Block 02)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS workflow_executions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workflow_id TEXT NOT NULL,
+                context_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                current_stage TEXT NOT NULL,
+                results TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -3003,6 +3016,97 @@ class SQLiteManager:
                 "operation_type": row["operation_type"],
                 "status": row["status"],
                 "current_stage": row["current_stage"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # --- Métodos Runtime Block 02: Workflow Execution Engine ---
+
+    def insert_workflow_execution(
+        self,
+        workflow_id: str,
+        context_id: int,
+        status: str,
+        current_stage: str,
+        results: Optional[str] = None,
+    ) -> int:
+        """Inserta una nueva ejecución de workflow."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO workflow_executions (workflow_id, context_id, status, current_stage, results)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (workflow_id, context_id, status, current_stage, results),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_workflow_execution(self, execution_id: int) -> Optional[dict]:
+        """Obtiene una ejecución de workflow por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, workflow_id, context_id, status, current_stage, results, created_at
+            FROM workflow_executions WHERE id = ?;
+            """,
+            (execution_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "workflow_id": row["workflow_id"],
+            "context_id": row["context_id"],
+            "status": row["status"],
+            "current_stage": row["current_stage"],
+            "results": row["results"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def update_workflow_execution(
+        self,
+        execution_id: int,
+        status: str,
+        current_stage: str,
+        results: Optional[str] = None,
+    ) -> None:
+        """Actualiza el estado, etapa actual y resultados de una ejecución de workflow."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE workflow_executions
+            SET status = ?, current_stage = ?, results = ?
+            WHERE id = ?;
+            """,
+            (status, current_stage, results, execution_id),
+        )
+        conn.commit()
+
+    def get_workflow_executions(self) -> list:
+        """Obtiene todas las ejecuciones de workflow ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, workflow_id, context_id, status, current_stage, results, created_at
+            FROM workflow_executions ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "workflow_id": row["workflow_id"],
+                "context_id": row["context_id"],
+                "status": row["status"],
+                "current_stage": row["current_stage"],
+                "results": row["results"],
                 "created_at": str(row["created_at"]),
             })
         return result
