@@ -561,6 +561,33 @@ class SQLiteManager:
             );
         """)
 
+        # 42. Tabla runtime_metrics (Runtime Block 06)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                metric_type TEXT NOT NULL,
+                workflow_id TEXT NOT NULL,
+                execution_id INTEGER DEFAULT 0,
+                value REAL DEFAULT 0.0,
+                unit TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 43. Tabla runtime_performance_reports (Runtime Block 06)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_performance_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                total_executions INTEGER DEFAULT 0,
+                successful_executions INTEGER DEFAULT 0,
+                failed_executions INTEGER DEFAULT 0,
+                average_execution_time REAL DEFAULT 0.0,
+                success_rate REAL DEFAULT 0.0,
+                most_failed_stage TEXT DEFAULT 'none',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -3399,6 +3426,109 @@ class SQLiteManager:
                 "failed_stages": row["failed_stages"],
                 "execution_time": row["execution_time"],
                 "summary": row["summary"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # CRUD para Runtime Observability (Runtime Block 06)
+    # ----------------------------------------------------
+    def insert_runtime_metric(
+        self,
+        metric_type: str,
+        workflow_id: str,
+        execution_id: int = 0,
+        value: float = 0.0,
+        unit: str = "",
+        created_at: Optional[str] = None
+    ) -> int:
+        """Inserta una métrica runtime en runtime_metrics y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            created_at = datetime.now().isoformat()
+        cursor.execute(
+            """
+            INSERT INTO runtime_metrics (
+                metric_type, workflow_id, execution_id, value, unit, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?);
+            """,
+            (metric_type, workflow_id, execution_id, value, unit, created_at)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_runtime_metrics(self) -> list:
+        """Obtiene todas las métricas runtime registradas ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, metric_type, workflow_id, execution_id, value, unit, created_at
+            FROM runtime_metrics ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "metric_type": row["metric_type"],
+                "workflow_id": row["workflow_id"],
+                "execution_id": row["execution_id"],
+                "value": row["value"],
+                "unit": row["unit"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    def insert_performance_report(
+        self,
+        total_executions: int = 0,
+        successful_executions: int = 0,
+        failed_executions: int = 0,
+        average_execution_time: float = 0.0,
+        success_rate: float = 0.0,
+        most_failed_stage: str = "none",
+        created_at: Optional[str] = None
+    ) -> int:
+        """Inserta un reporte de rendimiento runtime en runtime_performance_reports."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            created_at = datetime.now().isoformat()
+        cursor.execute(
+            """
+            INSERT INTO runtime_performance_reports (
+                total_executions, successful_executions, failed_executions, average_execution_time, success_rate, most_failed_stage, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?);
+            """,
+            (total_executions, successful_executions, failed_executions, average_execution_time, success_rate, most_failed_stage, created_at)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_performance_reports(self) -> list:
+        """Obtiene todos los reportes de rendimiento runtime ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, total_executions, successful_executions, failed_executions, average_execution_time, success_rate, most_failed_stage, created_at
+            FROM runtime_performance_reports ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "total_executions": row["total_executions"],
+                "successful_executions": row["successful_executions"],
+                "failed_executions": row["failed_executions"],
+                "average_execution_time": row["average_execution_time"],
+                "success_rate": row["success_rate"],
+                "most_failed_stage": row["most_failed_stage"],
                 "created_at": str(row["created_at"]),
             })
         return result
