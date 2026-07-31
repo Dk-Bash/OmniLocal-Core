@@ -616,6 +616,30 @@ class SQLiteManager:
             );
         """)
 
+        # 46. Tabla runtime_knowledge_entries (Runtime Block 09)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_knowledge_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                knowledge_type TEXT NOT NULL,
+                source_learning_id INTEGER DEFAULT 0,
+                pattern TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                confidence REAL DEFAULT 0.0,
+                usage_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 47. Tabla runtime_knowledge_queries (Runtime Block 09)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_knowledge_queries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query_type TEXT NOT NULL,
+                query_value TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -3662,6 +3686,103 @@ class SQLiteManager:
                 "priority": row["priority"],
                 "confidence": row["confidence"],
                 "reasoning": row["reasoning"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # CRUD para Runtime Knowledge Consolidation (Runtime Block 09)
+    # ----------------------------------------------------
+    def insert_knowledge_entry(
+        self,
+        knowledge_type: str,
+        pattern: str,
+        source_learning_id: int = 0,
+        description: str = "",
+        confidence: float = 0.0,
+        usage_count: int = 0,
+        created_at: Optional[str] = None
+    ) -> int:
+        """Inserta una entrada de conocimiento consolidado y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            created_at = datetime.now().isoformat()
+        cursor.execute(
+            """
+            INSERT INTO runtime_knowledge_entries (
+                knowledge_type, source_learning_id, pattern, description, confidence, usage_count, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?);
+            """,
+            (knowledge_type, source_learning_id, pattern, description, confidence, usage_count, created_at)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_knowledge_entries(self) -> list:
+        """Obtiene todas las entradas de conocimiento ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, knowledge_type, source_learning_id, pattern, description, confidence, usage_count, created_at
+            FROM runtime_knowledge_entries ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "knowledge_type": row["knowledge_type"],
+                "source_learning_id": row["source_learning_id"],
+                "pattern": row["pattern"],
+                "description": row["description"],
+                "confidence": row["confidence"],
+                "usage_count": row["usage_count"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    def insert_knowledge_query(
+        self,
+        query_type: str,
+        query_value: str,
+        created_at: Optional[str] = None
+    ) -> int:
+        """Inserta un registro de consulta de conocimiento y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            created_at = datetime.now().isoformat()
+        cursor.execute(
+            """
+            INSERT INTO runtime_knowledge_queries (
+                query_type, query_value, created_at
+            ) VALUES (?, ?, ?);
+            """,
+            (query_type, query_value, created_at)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_knowledge_queries(self) -> list:
+        """Obtiene todas las consultas de conocimiento registradas."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, query_type, query_value, created_at
+            FROM runtime_knowledge_queries ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "query_type": row["query_type"],
+                "query_value": row["query_value"],
                 "created_at": str(row["created_at"]),
             })
         return result
