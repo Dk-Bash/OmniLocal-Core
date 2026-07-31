@@ -654,6 +654,20 @@ class SQLiteManager:
             );
         """)
 
+        # 49. Tabla runtime_execution_plans (Runtime Block 11)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_execution_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_decision_id INTEGER DEFAULT 0,
+                plan_type TEXT NOT NULL,
+                steps TEXT DEFAULT '[]',
+                estimated_risk TEXT DEFAULT 'low',
+                confidence REAL DEFAULT 0.0,
+                reasoning TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -3875,6 +3889,85 @@ class SQLiteManager:
                 "confidence": row["confidence"],
                 "supporting_patterns": row["supporting_patterns"],
                 "recommended_action": row["recommended_action"],
+                "reasoning": row["reasoning"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # CRUD para Autonomous Planning Layer (Runtime Block 11)
+    # ----------------------------------------------------
+    def insert_execution_plan(
+        self,
+        plan_type: str,
+        source_decision_id: int = 0,
+        steps: str = "[]",
+        estimated_risk: str = "low",
+        confidence: float = 0.0,
+        reasoning: str = "",
+        created_at: Optional[str] = None
+    ) -> int:
+        """Inserta un plan de ejecución autónomo y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            created_at = datetime.now().isoformat()
+        cursor.execute(
+            """
+            INSERT INTO runtime_execution_plans (
+                source_decision_id, plan_type, steps, estimated_risk, confidence, reasoning, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?);
+            """,
+            (source_decision_id, plan_type, steps, estimated_risk, confidence, reasoning, created_at)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_execution_plan(self, plan_id: int) -> Optional[dict]:
+        """Obtiene un plan de ejecución por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, source_decision_id, plan_type, steps, estimated_risk, confidence, reasoning, created_at
+            FROM runtime_execution_plans WHERE id = ?;
+            """,
+            (plan_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "source_decision_id": row["source_decision_id"],
+            "plan_type": row["plan_type"],
+            "steps": row["steps"],
+            "estimated_risk": row["estimated_risk"],
+            "confidence": row["confidence"],
+            "reasoning": row["reasoning"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def get_execution_plans(self) -> list:
+        """Obtiene todos los planes de ejecución ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, source_decision_id, plan_type, steps, estimated_risk, confidence, reasoning, created_at
+            FROM runtime_execution_plans ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "source_decision_id": row["source_decision_id"],
+                "plan_type": row["plan_type"],
+                "steps": row["steps"],
+                "estimated_risk": row["estimated_risk"],
+                "confidence": row["confidence"],
                 "reasoning": row["reasoning"],
                 "created_at": str(row["created_at"]),
             })
