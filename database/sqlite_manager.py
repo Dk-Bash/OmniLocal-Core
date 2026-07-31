@@ -531,6 +531,20 @@ class SQLiteManager:
             );
         """)
 
+        # 40. Tabla autonomous_execution_cycles (Runtime Block 04)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS autonomous_execution_cycles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workflow_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                completed_stages INTEGER DEFAULT 0,
+                failed_stages INTEGER DEFAULT 0,
+                total_stages INTEGER DEFAULT 9,
+                success_rate REAL DEFAULT 0.0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -3191,6 +3205,102 @@ class SQLiteManager:
                 "success": bool(row["success"]),
                 "summary": row["summary"],
                 "data": row["data"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+
+    def insert_autonomous_cycle(
+        self,
+        workflow_id: str,
+        status: str = "running",
+        completed_stages: int = 0,
+        failed_stages: int = 0,
+        total_stages: int = 9,
+        success_rate: float = 0.0,
+    ) -> int:
+        """Inserta un nuevo ciclo de ejecución autónoma y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO autonomous_execution_cycles (workflow_id, status, completed_stages, failed_stages, total_stages, success_rate)
+            VALUES (?, ?, ?, ?, ?, ?);
+            """,
+            (workflow_id, status, completed_stages, failed_stages, total_stages, success_rate),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def update_autonomous_cycle(
+        self,
+        cycle_id: int,
+        status: str,
+        completed_stages: int,
+        failed_stages: int,
+        total_stages: int,
+        success_rate: float,
+    ) -> bool:
+        """Actualiza el estado y métricas de un ciclo de ejecución autónoma."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE autonomous_execution_cycles
+            SET status = ?, completed_stages = ?, failed_stages = ?, total_stages = ?, success_rate = ?
+            WHERE id = ?;
+            """,
+            (status, completed_stages, failed_stages, total_stages, success_rate, cycle_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def get_autonomous_cycle(self, cycle_id: int) -> Optional[dict]:
+        """Obtiene un ciclo de ejecución autónoma por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, workflow_id, status, completed_stages, failed_stages, total_stages, success_rate, created_at
+            FROM autonomous_execution_cycles WHERE id = ?;
+            """,
+            (cycle_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "workflow_id": row["workflow_id"],
+            "status": row["status"],
+            "completed_stages": row["completed_stages"],
+            "failed_stages": row["failed_stages"],
+            "total_stages": row["total_stages"],
+            "success_rate": row["success_rate"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def get_autonomous_cycles(self) -> list:
+        """Obtiene todos los ciclos de ejecución autónoma ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, workflow_id, status, completed_stages, failed_stages, total_stages, success_rate, created_at
+            FROM autonomous_execution_cycles ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "workflow_id": row["workflow_id"],
+                "status": row["status"],
+                "completed_stages": row["completed_stages"],
+                "failed_stages": row["failed_stages"],
+                "total_stages": row["total_stages"],
+                "success_rate": row["success_rate"],
                 "created_at": str(row["created_at"]),
             })
         return result

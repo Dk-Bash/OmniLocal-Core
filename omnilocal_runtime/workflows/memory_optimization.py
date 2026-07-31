@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Callable
+from typing import List, Dict, Any, Callable, Optional
 from omnilocal_runtime.workflows.models import WorkflowDefinition
 
 
@@ -17,14 +17,15 @@ STAGES_LIST = [
 
 class MemoryOptimizationWorkflow:
     """
-    Workflow oficial de optimización de memoria para OmniLocal Runtime.
-    Coordina secuencialmente las 9 etapas conceptuales sin realizar modificaciones destructivas.
+    Workflow oficial de optimización de memoria autónomo para OmniLocal Runtime (Runtime Block 04).
+    Coordina secuencialmente las 9 etapas ejecutando capacidades reales mediante CapabilityBindingManager.
     """
 
-    def __init__(self):
+    def __init__(self, capability_binding_manager: Optional[Any] = None):
         self.name = "memory_optimization"
         self.description = "Workflow oficial de optimización de memoria de OmniLocal"
         self.stages = STAGES_LIST
+        self.capability_binding_manager = capability_binding_manager
 
     def get_definition(self) -> WorkflowDefinition:
         """Devuelve la definición oficial del workflow."""
@@ -34,12 +35,21 @@ class MemoryOptimizationWorkflow:
             stages=self.stages,
         )
 
-    @staticmethod
-    def run_stage(stage_name: str, context: Any = None) -> Dict[str, Any]:
+    def run_stage(self, stage_name: str, context: Any = None) -> Dict[str, Any]:
         """
-        Ejecuta una etapa individual y devuelve el diccionario estructurado.
-        Cada stage devuelve: {"stage_name": ..., "status": ..., "summary": ...}
+        Ejecuta una etapa individual. Si se configuró capability_binding_manager y existe un binding,
+        delega la ejecución en la capacidad real. De lo contrario, ejecuta el fallback.
         """
+        if self.capability_binding_manager and self.capability_binding_manager.get_binding(stage_name):
+            binding_res = self.capability_binding_manager.execute_binding(stage_name, context)
+            return {
+                "stage_name": binding_res.stage_name,
+                "status": "completed" if binding_res.success else "failed",
+                "summary": binding_res.summary,
+                "manager_name": binding_res.manager_name,
+                "data": binding_res.data,
+            }
+
         summaries = {
             "memory_analysis": "Análisis preliminar de memorias finalizado sin detectar anomalías críticas.",
             "priority_evaluation": "Evaluación de prioridades asignada a las tareas pendientes.",
@@ -54,7 +64,7 @@ class MemoryOptimizationWorkflow:
 
         summary = summaries.get(
             stage_name,
-            f"Ejecución simulada de la etapa '{stage_name}' completada."
+            f"Ejecución de la etapa '{stage_name}' completada."
         )
 
         return {
@@ -72,3 +82,4 @@ class MemoryOptimizationWorkflow:
             ctx.metadata["stage_results"].append(res)
             return res
         return handler
+

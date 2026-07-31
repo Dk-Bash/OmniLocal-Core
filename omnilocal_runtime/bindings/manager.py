@@ -81,11 +81,28 @@ class CapabilityBindingManager:
                 raw_output = target(context, **kwargs)
             elif method_name and hasattr(target, method_name):
                 method = getattr(target, method_name)
-                # Intentar llamar pasando contexto si acepta argumentos
+                import inspect
                 try:
-                    raw_output = method(context, **kwargs)
-                except TypeError:
-                    raw_output = method()
+                    sig = inspect.signature(method)
+                    params = sig.parameters
+                    has_context_param = any(p in params for p in ("context", "ctx", "runtime_context"))
+                    if has_context_param:
+                        raw_output = method(context, **kwargs)
+                    elif len(params) == 0:
+                        raw_output = method()
+                    else:
+                        try:
+                            raw_output = method(**kwargs)
+                        except TypeError:
+                            try:
+                                raw_output = method()
+                            except TypeError:
+                                raw_output = method(context, **kwargs)
+                except Exception:
+                    try:
+                        raw_output = method()
+                    except TypeError:
+                        raw_output = method(context, **kwargs)
             elif hasattr(target, "analyze_memory"):
                 raw_output = target.analyze_memory()
             elif hasattr(target, "prioritize"):
