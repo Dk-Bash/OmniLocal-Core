@@ -588,6 +588,34 @@ class SQLiteManager:
             );
         """)
 
+        # 44. Tabla runtime_learning_records (Runtime Block 08)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_learning_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_execution_id INTEGER DEFAULT 0,
+                source_decision_id INTEGER DEFAULT 0,
+                learning_type TEXT NOT NULL,
+                pattern_detected TEXT NOT NULL,
+                confidence REAL DEFAULT 0.0,
+                impact_prediction TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 45. Tabla runtime_adaptation_recommendations (Runtime Block 08)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_adaptation_recommendations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                learning_id INTEGER DEFAULT 0,
+                target_area TEXT NOT NULL,
+                recommended_change TEXT NOT NULL,
+                priority TEXT DEFAULT 'medium',
+                confidence REAL DEFAULT 0.0,
+                reasoning TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -3529,6 +3557,111 @@ class SQLiteManager:
                 "average_execution_time": row["average_execution_time"],
                 "success_rate": row["success_rate"],
                 "most_failed_stage": row["most_failed_stage"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # CRUD para Runtime Learning & Adaptation (Runtime Block 08)
+    # ----------------------------------------------------
+    def insert_learning_record(
+        self,
+        learning_type: str,
+        pattern_detected: str,
+        source_execution_id: int = 0,
+        source_decision_id: int = 0,
+        confidence: float = 0.0,
+        impact_prediction: str = "",
+        created_at: Optional[str] = None
+    ) -> int:
+        """Inserta un registro de aprendizaje runtime y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            created_at = datetime.now().isoformat()
+        cursor.execute(
+            """
+            INSERT INTO runtime_learning_records (
+                source_execution_id, source_decision_id, learning_type, pattern_detected, confidence, impact_prediction, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?);
+            """,
+            (source_execution_id, source_decision_id, learning_type, pattern_detected, confidence, impact_prediction, created_at)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_learning_records(self) -> list:
+        """Obtiene todos los registros de aprendizaje ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, source_execution_id, source_decision_id, learning_type, pattern_detected, confidence, impact_prediction, created_at
+            FROM runtime_learning_records ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "source_execution_id": row["source_execution_id"],
+                "source_decision_id": row["source_decision_id"],
+                "learning_type": row["learning_type"],
+                "pattern_detected": row["pattern_detected"],
+                "confidence": row["confidence"],
+                "impact_prediction": row["impact_prediction"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    def insert_adaptation(
+        self,
+        learning_id: int,
+        target_area: str,
+        recommended_change: str,
+        priority: str = "medium",
+        confidence: float = 0.0,
+        reasoning: str = "",
+        created_at: Optional[str] = None
+    ) -> int:
+        """Inserta una recomendación de adaptación runtime y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            created_at = datetime.now().isoformat()
+        cursor.execute(
+            """
+            INSERT INTO runtime_adaptation_recommendations (
+                learning_id, target_area, recommended_change, priority, confidence, reasoning, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?);
+            """,
+            (learning_id, target_area, recommended_change, priority, confidence, reasoning, created_at)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_adaptations(self) -> list:
+        """Obtiene todas las recomendaciones de adaptación ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, learning_id, target_area, recommended_change, priority, confidence, reasoning, created_at
+            FROM runtime_adaptation_recommendations ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "learning_id": row["learning_id"],
+                "target_area": row["target_area"],
+                "recommended_change": row["recommended_change"],
+                "priority": row["priority"],
+                "confidence": row["confidence"],
+                "reasoning": row["reasoning"],
                 "created_at": str(row["created_at"]),
             })
         return result
