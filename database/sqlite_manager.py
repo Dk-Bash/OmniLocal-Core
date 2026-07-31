@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import json
+from datetime import datetime
 from typing import Optional, Any
 from app.config import DATABASE_PATH
 
@@ -541,6 +542,21 @@ class SQLiteManager:
                 failed_stages INTEGER DEFAULT 0,
                 total_stages INTEGER DEFAULT 9,
                 success_rate REAL DEFAULT 0.0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 41. Tabla runtime_validation_reports (Runtime Block 05)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_validation_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scenario_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                stages_executed INTEGER DEFAULT 0,
+                successful_stages INTEGER DEFAULT 0,
+                failed_stages INTEGER DEFAULT 0,
+                execution_time REAL DEFAULT 0.0,
+                summary TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
@@ -3301,6 +3317,88 @@ class SQLiteManager:
                 "failed_stages": row["failed_stages"],
                 "total_stages": row["total_stages"],
                 "success_rate": row["success_rate"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # CRUD para Runtime Validation Reports (Runtime Block 05)
+    # ----------------------------------------------------
+    def insert_runtime_validation_report(
+        self,
+        scenario_name: str,
+        status: str,
+        stages_executed: int = 0,
+        successful_stages: int = 0,
+        failed_stages: int = 0,
+        execution_time: float = 0.0,
+        summary: str = "",
+        created_at: Optional[str] = None
+    ) -> int:
+        """Inserta un reporte de validación runtime y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            created_at = datetime.now().isoformat()
+        cursor.execute(
+            """
+            INSERT INTO runtime_validation_reports (
+                scenario_name, status, stages_executed, successful_stages, failed_stages, execution_time, summary, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            (scenario_name, status, stages_executed, successful_stages, failed_stages, execution_time, summary, created_at)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_runtime_validation_report(self, report_id: int) -> Optional[dict]:
+        """Obtiene un reporte de validación runtime por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, scenario_name, status, stages_executed, successful_stages, failed_stages, execution_time, summary, created_at
+            FROM runtime_validation_reports WHERE id = ?;
+            """,
+            (report_id,)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "scenario_name": row["scenario_name"],
+            "status": row["status"],
+            "stages_executed": row["stages_executed"],
+            "successful_stages": row["successful_stages"],
+            "failed_stages": row["failed_stages"],
+            "execution_time": row["execution_time"],
+            "summary": row["summary"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def get_runtime_validation_reports(self) -> list:
+        """Obtiene todos los reportes de validación runtime ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, scenario_name, status, stages_executed, successful_stages, failed_stages, execution_time, summary, created_at
+            FROM runtime_validation_reports ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "scenario_name": row["scenario_name"],
+                "status": row["status"],
+                "stages_executed": row["stages_executed"],
+                "successful_stages": row["successful_stages"],
+                "failed_stages": row["failed_stages"],
+                "execution_time": row["execution_time"],
+                "summary": row["summary"],
                 "created_at": str(row["created_at"]),
             })
         return result
