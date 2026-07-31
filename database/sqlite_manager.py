@@ -640,6 +640,20 @@ class SQLiteManager:
             );
         """)
 
+        # 48. Tabla runtime_knowledge_decisions (Runtime Block 10)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_knowledge_decisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_knowledge_ids TEXT DEFAULT '',
+                decision_type TEXT NOT NULL,
+                confidence REAL DEFAULT 0.0,
+                supporting_patterns TEXT DEFAULT '',
+                recommended_action TEXT DEFAULT '',
+                reasoning TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -3783,6 +3797,85 @@ class SQLiteManager:
                 "id": row["id"],
                 "query_type": row["query_type"],
                 "query_value": row["query_value"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # ----------------------------------------------------
+    # CRUD para Knowledge-Augmented Decision Layer (Runtime Block 10)
+    # ----------------------------------------------------
+    def insert_knowledge_decision(
+        self,
+        decision_type: str,
+        source_knowledge_ids: str = "",
+        confidence: float = 0.0,
+        supporting_patterns: str = "",
+        recommended_action: str = "",
+        reasoning: str = "",
+        created_at: Optional[str] = None
+    ) -> int:
+        """Inserta un informe de decisión basada en conocimiento y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            created_at = datetime.now().isoformat()
+        cursor.execute(
+            """
+            INSERT INTO runtime_knowledge_decisions (
+                decision_type, source_knowledge_ids, confidence, supporting_patterns, recommended_action, reasoning, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?);
+            """,
+            (decision_type, source_knowledge_ids, confidence, supporting_patterns, recommended_action, reasoning, created_at)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_knowledge_decision(self, decision_id: int) -> Optional[dict]:
+        """Obtiene una decisión de conocimiento por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, source_knowledge_ids, decision_type, confidence, supporting_patterns, recommended_action, reasoning, created_at
+            FROM runtime_knowledge_decisions WHERE id = ?;
+            """,
+            (decision_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "source_knowledge_ids": row["source_knowledge_ids"],
+            "decision_type": row["decision_type"],
+            "confidence": row["confidence"],
+            "supporting_patterns": row["supporting_patterns"],
+            "recommended_action": row["recommended_action"],
+            "reasoning": row["reasoning"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def get_knowledge_decisions(self) -> list:
+        """Obtiene todas las decisiones de conocimiento ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, source_knowledge_ids, decision_type, confidence, supporting_patterns, recommended_action, reasoning, created_at
+            FROM runtime_knowledge_decisions ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "source_knowledge_ids": row["source_knowledge_ids"],
+                "decision_type": row["decision_type"],
+                "confidence": row["confidence"],
+                "supporting_patterns": row["supporting_patterns"],
+                "recommended_action": row["recommended_action"],
+                "reasoning": row["reasoning"],
                 "created_at": str(row["created_at"]),
             })
         return result
