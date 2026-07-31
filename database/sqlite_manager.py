@@ -668,6 +668,33 @@ class SQLiteManager:
             );
         """)
 
+        # 50. Tabla runtime_plan_simulations (Runtime Block 12)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_plan_simulations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                plan_id INTEGER DEFAULT 0,
+                simulation_status TEXT NOT NULL,
+                predicted_outcome TEXT DEFAULT '',
+                predicted_issues TEXT DEFAULT '',
+                confidence REAL DEFAULT 0.0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 51. Tabla runtime_plan_validations (Runtime Block 12)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_plan_validations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                plan_id INTEGER DEFAULT 0,
+                validation_status TEXT NOT NULL,
+                risk_level TEXT DEFAULT 'low',
+                checks_performed TEXT DEFAULT '[]',
+                failed_checks TEXT DEFAULT '[]',
+                recommendation TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -3969,6 +3996,151 @@ class SQLiteManager:
                 "estimated_risk": row["estimated_risk"],
                 "confidence": row["confidence"],
                 "reasoning": row["reasoning"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # --- Runtime Block 12: Plan Validation & Simulation CRUD ---
+
+    def insert_plan_simulation(
+        self,
+        plan_id: int,
+        simulation_status: str,
+        predicted_outcome: str = "",
+        predicted_issues: str = "",
+        confidence: float = 0.0
+    ) -> int:
+        """Inserta una simulación de plan en runtime_plan_simulations y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO runtime_plan_simulations
+            (plan_id, simulation_status, predicted_outcome, predicted_issues, confidence)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (plan_id, simulation_status, predicted_outcome, predicted_issues, confidence)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_plan_simulation(self, simulation_id: int) -> Optional[dict]:
+        """Obtiene una simulación de plan por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, plan_id, simulation_status, predicted_outcome, predicted_issues, confidence, created_at
+            FROM runtime_plan_simulations WHERE id = ?;
+            """,
+            (simulation_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "plan_id": row["plan_id"],
+            "simulation_status": row["simulation_status"],
+            "predicted_outcome": row["predicted_outcome"],
+            "predicted_issues": row["predicted_issues"],
+            "confidence": row["confidence"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def get_plan_simulations(self) -> list:
+        """Obtiene todas las simulaciones de planes ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, plan_id, simulation_status, predicted_outcome, predicted_issues, confidence, created_at
+            FROM runtime_plan_simulations ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "plan_id": row["plan_id"],
+                "simulation_status": row["simulation_status"],
+                "predicted_outcome": row["predicted_outcome"],
+                "predicted_issues": row["predicted_issues"],
+                "confidence": row["confidence"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    def insert_plan_validation(
+        self,
+        plan_id: int,
+        validation_status: str,
+        risk_level: str = "low",
+        checks_performed: str = "[]",
+        failed_checks: str = "[]",
+        recommendation: str = ""
+    ) -> int:
+        """Inserta una validación de plan en runtime_plan_validations y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO runtime_plan_validations
+            (plan_id, validation_status, risk_level, checks_performed, failed_checks, recommendation)
+            VALUES (?, ?, ?, ?, ?, ?);
+            """,
+            (plan_id, validation_status, risk_level, checks_performed, failed_checks, recommendation)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_plan_validation(self, validation_id: int) -> Optional[dict]:
+        """Obtiene un reporte de validación de plan por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, plan_id, validation_status, risk_level, checks_performed, failed_checks, recommendation, created_at
+            FROM runtime_plan_validations WHERE id = ?;
+            """,
+            (validation_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "plan_id": row["plan_id"],
+            "validation_status": row["validation_status"],
+            "risk_level": row["risk_level"],
+            "checks_performed": row["checks_performed"],
+            "failed_checks": row["failed_checks"],
+            "recommendation": row["recommendation"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def get_plan_validations(self) -> list:
+        """Obtiene todas las validaciones de planes ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, plan_id, validation_status, risk_level, checks_performed, failed_checks, recommendation, created_at
+            FROM runtime_plan_validations ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "plan_id": row["plan_id"],
+                "validation_status": row["validation_status"],
+                "risk_level": row["risk_level"],
+                "checks_performed": row["checks_performed"],
+                "failed_checks": row["failed_checks"],
+                "recommendation": row["recommendation"],
                 "created_at": str(row["created_at"]),
             })
         return result
