@@ -494,6 +494,17 @@ class SQLiteManager:
             );
         """)
 
+        # 37. Tabla runtime_contexts (Runtime Block 01)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_contexts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                operation_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                current_stage TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -2919,6 +2930,79 @@ class SQLiteManager:
                 "improvement_area": row["improvement_area"],
                 "confidence": float(row["confidence"]),
                 "recommendation": row["recommendation"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # --- Métodos Runtime Block 01: OmniLocal Core Engine ---
+
+    def insert_runtime_context(
+        self,
+        operation_type: str,
+        status: str,
+        current_stage: str,
+    ) -> int:
+        """Inserta un nuevo contexto de ejecución runtime."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO runtime_contexts (operation_type, status, current_stage)
+            VALUES (?, ?, ?);
+            """,
+            (operation_type, status, current_stage),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_runtime_context(self, context_id: int) -> Optional[dict]:
+        """Obtiene un contexto de ejecución por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, operation_type, status, current_stage, created_at FROM runtime_contexts WHERE id = ?;",
+            (context_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "operation_type": row["operation_type"],
+            "status": row["status"],
+            "current_stage": row["current_stage"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def update_runtime_status(self, context_id: int, status: str, current_stage: str) -> None:
+        """Actualiza el estado y la etapa actual de un contexto de ejecución."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE runtime_contexts
+            SET status = ?, current_stage = ?
+            WHERE id = ?;
+            """,
+            (status, current_stage, context_id),
+        )
+        conn.commit()
+
+    def get_runtime_contexts(self) -> list:
+        """Obtiene todos los contextos de ejecución ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, operation_type, status, current_stage, created_at FROM runtime_contexts ORDER BY id DESC;"
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "operation_type": row["operation_type"],
+                "status": row["status"],
+                "current_stage": row["current_stage"],
                 "created_at": str(row["created_at"]),
             })
         return result
