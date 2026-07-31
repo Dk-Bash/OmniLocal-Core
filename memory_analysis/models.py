@@ -1,6 +1,9 @@
 from datetime import datetime
 from typing import Optional, Dict
-from pydantic import BaseModel, Field
+try:
+    from pydantic import BaseModel, Field
+except ImportError:
+    from memory.models import BaseModel, Field
 
 
 class MemoryAnalysis(BaseModel):

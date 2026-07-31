@@ -518,6 +518,19 @@ class SQLiteManager:
             );
         """)
 
+        # 39. Tabla runtime_capability_results (Runtime Block 03)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_capability_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stage_name TEXT NOT NULL,
+                manager_name TEXT NOT NULL,
+                success INTEGER NOT NULL,
+                summary TEXT NOT NULL,
+                data TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -3107,6 +3120,77 @@ class SQLiteManager:
                 "status": row["status"],
                 "current_stage": row["current_stage"],
                 "results": row["results"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # --- Métodos Runtime Block 03: Real Capability Binding Layer ---
+
+    def insert_capability_result(
+        self,
+        stage_name: str,
+        manager_name: str,
+        success: bool,
+        summary: str,
+        data: Optional[str] = None,
+    ) -> int:
+        """Inserta un nuevo resultado de ejecución de capability binding."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO runtime_capability_results (stage_name, manager_name, success, summary, data)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (stage_name, manager_name, 1 if success else 0, summary, data),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_capability_result(self, result_id: int) -> Optional[dict]:
+        """Obtiene un resultado de capability binding por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, stage_name, manager_name, success, summary, data, created_at
+            FROM runtime_capability_results WHERE id = ?;
+            """,
+            (result_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "stage_name": row["stage_name"],
+            "manager_name": row["manager_name"],
+            "success": bool(row["success"]),
+            "summary": row["summary"],
+            "data": row["data"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def get_capability_results(self) -> list:
+        """Obtiene todos los resultados de capability binding ordenados por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, stage_name, manager_name, success, summary, data, created_at
+            FROM runtime_capability_results ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "stage_name": row["stage_name"],
+                "manager_name": row["manager_name"],
+                "success": bool(row["success"]),
+                "summary": row["summary"],
+                "data": row["data"],
                 "created_at": str(row["created_at"]),
             })
         return result

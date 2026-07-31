@@ -11,14 +11,17 @@ class WorkflowEngine:
     """
     Motor de ejecución de workflows de OmniLocal Runtime.
     Registra workflows y los ejecuta coordinándolos mediante OmniLocalEngine e inyección de dependencias.
+    Soporta CapabilityBindingManager para conectar etapas con capacidades (managers) reales.
     """
 
     def __init__(
         self,
         engine: OmniLocalEngine,
+        capability_binding_manager: Optional[Any] = None,
         db_manager: Optional[SQLiteManager] = None,
     ):
         self.engine = engine
+        self.capability_binding_manager = capability_binding_manager
         self.db_manager = db_manager or getattr(engine, "db_manager", SQLiteManager())
         self.registry: Dict[str, WorkflowDefinition] = {}
 
@@ -88,20 +91,39 @@ class WorkflowEngine:
         for stage in wf_def.stages:
             stage_name = stage if isinstance(stage, str) else stage.get("name", "unknown_stage")
 
-            if workflow_name == "memory_optimization":
+            if self.capability_binding_manager and self.capability_binding_manager.get_binding(stage_name):
+                def make_binding_handler(s_name):
+                    def handler(ctx):
+                        binding_res = self.capability_binding_manager.execute_binding(s_name, ctx)
+                        res = {
+                            "stage_name": binding_res.stage_name,
+                            "status": "completed" if binding_res.success else "failed",
+                            "summary": binding_res.summary,
+                            "manager_name": binding_res.manager_name,
+                            "data": binding_res.data,
+                        }
+                        if "stage_results" not in ctx.metadata:
+                            ctx.metadata["stage_results"] = []
+                        ctx.metadata["stage_results"].append(res)
+                        return res
+                    return handler
+                handler = make_binding_handler(stage_name)
+            elif workflow_name == "memory_optimization":
                 handler = mem_workflow_helper.get_stage_handler(stage_name)
             else:
-                def generic_handler(ctx, s_name=stage_name):
-                    res = {
-                        "stage_name": s_name,
-                        "status": "completed",
-                        "summary": f"Ejecución de la etapa '{s_name}' completada."
-                    }
-                    if "stage_results" not in ctx.metadata:
-                        ctx.metadata["stage_results"] = []
-                    ctx.metadata["stage_results"].append(res)
-                    return res
-                handler = generic_handler
+                def make_generic_handler(s_name):
+                    def handler(ctx):
+                        res = {
+                            "stage_name": s_name,
+                            "status": "completed",
+                            "summary": f"Ejecución de la etapa '{s_name}' completada."
+                        }
+                        if "stage_results" not in ctx.metadata:
+                            ctx.metadata["stage_results"] = []
+                        ctx.metadata["stage_results"].append(res)
+                        return res
+                    return handler
+                handler = make_generic_handler(stage_name)
 
             pipeline.add_stage(stage_name, handler)
 

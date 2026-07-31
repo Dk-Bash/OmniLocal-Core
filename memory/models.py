@@ -1,11 +1,84 @@
 from datetime import datetime
-from typing import Optional
-from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any, List
 
 try:
-    from pydantic import field_validator
+    from pydantic import BaseModel, Field
+    try:
+        from pydantic import field_validator
+    except ImportError:
+        from pydantic import validator as field_validator
 except ImportError:
-    from pydantic import validator as field_validator
+    class ValidationError(Exception):
+        pass
+
+    def Field(default=None, default_factory=None, ge=None, le=None, **kwargs):
+        return {
+            "__is_field__": True,
+            "default": default,
+            "default_factory": default_factory,
+            "ge": ge,
+            "le": le,
+        }
+
+    def field_validator(*fields, **kwargs):
+        def decorator(fn):
+            fn.__is_field_validator__ = True
+            fn.__validator_fields__ = fields
+            return classmethod(fn)
+        return decorator
+
+    class BaseModel:
+        def __init__(self, **data):
+            cls = self.__class__
+            annotations = getattr(cls, "__annotations__", {})
+            for name in annotations.keys():
+                if name in data:
+                    val = data[name]
+                elif hasattr(cls, name):
+                    class_attr = getattr(cls, name)
+                    if isinstance(class_attr, dict) and class_attr.get("__is_field__"):
+                        if class_attr.get("default_factory") is not None:
+                            val = class_attr["default_factory"]()
+                        else:
+                            val = class_attr.get("default")
+                    else:
+                        val = class_attr
+                else:
+                    val = None
+                setattr(self, name, val)
+
+            for attr_name in dir(cls):
+                try:
+                    attr = getattr(cls, attr_name, None)
+                except Exception:
+                    continue
+                if callable(attr) and getattr(attr, "__is_field_validator__", False):
+                    validator_fields = getattr(attr, "__validator_fields__", [])
+                    for f_name in validator_fields:
+                        f_val = getattr(self, f_name, None)
+                        if f_val is not None:
+                            try:
+                                unwrapped = getattr(attr, "__func__", attr)
+                                new_val = unwrapped(cls, f_val)
+                                setattr(self, f_name, new_val)
+                            except ValueError as ve:
+                                raise ValidationError(str(ve))
+
+        def dict(self, *args, **kwargs) -> Dict[str, Any]:
+            res = {}
+            annotations = getattr(self.__class__, "__annotations__", {})
+            for k in annotations.keys():
+                v = getattr(self, k, None)
+                if hasattr(v, "dict"):
+                    res[k] = v.dict()
+                elif isinstance(v, list):
+                    res[k] = [item.dict() if hasattr(item, "dict") else item for item in v]
+                else:
+                    res[k] = v
+            return res
+
+        def model_dump(self, *args, **kwargs) -> Dict[str, Any]:
+            return self.dict(*args, **kwargs)
 
 
 class User(BaseModel):
