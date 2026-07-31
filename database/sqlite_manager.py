@@ -695,6 +695,33 @@ class SQLiteManager:
             );
         """)
 
+        # 52. Tabla runtime_execution_authorizations (Runtime Block 13)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_execution_authorizations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                plan_id INTEGER DEFAULT 0,
+                validation_id INTEGER DEFAULT 0,
+                authorization_status TEXT NOT NULL,
+                authorization_level TEXT DEFAULT 'normal',
+                approved_conditions TEXT DEFAULT '[]',
+                rejected_conditions TEXT DEFAULT '[]',
+                reasoning TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 53. Tabla runtime_authorization_conditions (Runtime Block 13)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS runtime_authorization_conditions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                authorization_id INTEGER DEFAULT 0,
+                condition_name TEXT NOT NULL,
+                condition_status TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                severity TEXT DEFAULT 'info'
+            );
+        """)
+
         self.conn.commit()
 
     # ----------------------------------------------------
@@ -4142,6 +4169,130 @@ class SQLiteManager:
                 "failed_checks": row["failed_checks"],
                 "recommendation": row["recommendation"],
                 "created_at": str(row["created_at"]),
+            })
+        return result
+
+    # --- Runtime Block 13: Execution Authorization CRUD ---
+
+    def insert_execution_authorization(
+        self,
+        plan_id: int,
+        validation_id: int,
+        authorization_status: str,
+        authorization_level: str = "normal",
+        approved_conditions: str = "[]",
+        rejected_conditions: str = "[]",
+        reasoning: str = ""
+    ) -> int:
+        """Inserta un registro de autorización en runtime_execution_authorizations y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO runtime_execution_authorizations
+            (plan_id, validation_id, authorization_status, authorization_level, approved_conditions, rejected_conditions, reasoning)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+            """,
+            (plan_id, validation_id, authorization_status, authorization_level, approved_conditions, rejected_conditions, reasoning)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_execution_authorization(self, authorization_id: int) -> Optional[dict]:
+        """Obtiene un registro de autorización por su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, plan_id, validation_id, authorization_status, authorization_level, approved_conditions, rejected_conditions, reasoning, created_at
+            FROM runtime_execution_authorizations WHERE id = ?;
+            """,
+            (authorization_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "plan_id": row["plan_id"],
+            "validation_id": row["validation_id"],
+            "authorization_status": row["authorization_status"],
+            "authorization_level": row["authorization_level"],
+            "approved_conditions": row["approved_conditions"],
+            "rejected_conditions": row["rejected_conditions"],
+            "reasoning": row["reasoning"],
+            "created_at": str(row["created_at"]),
+        }
+
+    def get_execution_authorizations(self) -> list:
+        """Obtiene todas las autorizaciones ordenadas por ID descendente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, plan_id, validation_id, authorization_status, authorization_level, approved_conditions, rejected_conditions, reasoning, created_at
+            FROM runtime_execution_authorizations ORDER BY id DESC;
+            """
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "plan_id": row["plan_id"],
+                "validation_id": row["validation_id"],
+                "authorization_status": row["authorization_status"],
+                "authorization_level": row["authorization_level"],
+                "approved_conditions": row["approved_conditions"],
+                "rejected_conditions": row["rejected_conditions"],
+                "reasoning": row["reasoning"],
+                "created_at": str(row["created_at"]),
+            })
+        return result
+
+    def insert_authorization_condition(
+        self,
+        authorization_id: int,
+        condition_name: str,
+        condition_status: str,
+        description: str = "",
+        severity: str = "info"
+    ) -> int:
+        """Inserta una condición de autorización en runtime_authorization_conditions y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO runtime_authorization_conditions
+            (authorization_id, condition_name, condition_status, description, severity)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (authorization_id, condition_name, condition_status, description, severity)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_authorization_conditions(self, authorization_id: int) -> list:
+        """Obtiene las condiciones asociadas a un ID de autorización."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, authorization_id, condition_name, condition_status, description, severity
+            FROM runtime_authorization_conditions WHERE authorization_id = ?;
+            """,
+            (authorization_id,)
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "authorization_id": row["authorization_id"],
+                "condition_name": row["condition_name"],
+                "condition_status": row["condition_status"],
+                "description": row["description"],
+                "severity": row["severity"],
             })
         return result
 
