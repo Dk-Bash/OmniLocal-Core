@@ -706,6 +706,16 @@ class SQLiteManager:
 
         self._migrate_conversations_session_id(cursor)
 
+        # 50. Tabla memory_embeddings (Bloque 4A -- Semantic Retrieval, aditiva)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS memory_embeddings (
+                memory_id INTEGER PRIMARY KEY,
+                vector TEXT NOT NULL,
+                model TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
 
     def _migrate_conversations_session_id(self, cursor) -> None:
@@ -810,6 +820,46 @@ class SQLiteManager:
         )
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Memory Embeddings (Bloque 4A -- Semantic Retrieval)
+    # ----------------------------------------------------
+    def upsert_memory_embedding(self, memory_id: int, vector: list, model: str) -> None:
+        """Guarda (o reemplaza) el embedding de una memoria."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO memory_embeddings (memory_id, vector, model)
+            VALUES (?, ?, ?)
+            ON CONFLICT(memory_id) DO UPDATE SET vector = excluded.vector, model = excluded.model, created_at = CURRENT_TIMESTAMP;
+            """,
+            (memory_id, json.dumps(vector), model)
+        )
+        conn.commit()
+
+    def get_memory_embedding(self, memory_id: int) -> Optional[dict]:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM memory_embeddings WHERE memory_id = ?;", (memory_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        data = dict(row)
+        data["vector"] = json.loads(data["vector"])
+        return data
+
+    def get_all_memory_embeddings(self) -> list:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM memory_embeddings;")
+        rows = cursor.fetchall()
+        results = []
+        for row in rows:
+            data = dict(row)
+            data["vector"] = json.loads(data["vector"])
+            results.append(data)
+        return results
 
     # ----------------------------------------------------
     # Operaciones CRUD para Conversations (capa de IA local)

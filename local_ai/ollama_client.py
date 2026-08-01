@@ -16,7 +16,7 @@ from typing import List, Optional
 
 import requests
 
-from app.config import OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_TIMEOUT_SECONDS
+from app.config import OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_EMBED_MODEL, OLLAMA_TIMEOUT_SECONDS
 from app.logger import get_logger
 
 logger = get_logger(__name__)
@@ -36,10 +36,12 @@ class OllamaClient:
         self,
         host: Optional[str] = None,
         model: Optional[str] = None,
+        embed_model: Optional[str] = None,
         timeout: Optional[int] = None,
     ):
         self.host = (host or OLLAMA_HOST).rstrip("/")
         self.model = model or OLLAMA_MODEL
+        self.embed_model = embed_model or OLLAMA_EMBED_MODEL
         self.timeout = timeout or OLLAMA_TIMEOUT_SECONDS
 
     def is_available(self) -> bool:
@@ -90,6 +92,18 @@ class OllamaClient:
         except requests.exceptions.RequestException:
             return False
 
+    def has_embedding_model(self) -> bool:
+        """Igual que has_model(), pero para el modelo de embeddings (Bloque 4A)."""
+        try:
+            resp = requests.get(f"{self.host}/api/tags", timeout=3)
+            if resp.status_code != 200:
+                return False
+            data = resp.json()
+            names = [m.get("name", "") for m in data.get("models", [])]
+            return any(n == self.embed_model or n.startswith(self.embed_model.split(":")[0]) for n in names)
+        except requests.exceptions.RequestException:
+            return False
+
     def generate(
         self,
         prompt: str,
@@ -136,3 +150,29 @@ class OllamaClient:
 
         data = resp.json()
         return data.get("response", "").strip()
+
+    def embed(self, text: str) -> List[float]:
+        """
+        Genera el vector de embedding de `text` usando el modelo de
+        embeddings (separado del modelo de lenguaje). Bloque 4A --
+        infraestructura de comprensión semántica, todavía sin conectar al
+        flujo de conversación (ver local_ai/embeddings.py).
+        """
+        payload = {"model": self.embed_model, "input": text}
+        try:
+            resp = requests.post(
+                f"{self.host}/api/embed",
+                data=json.dumps(payload),
+                headers={"Content-Type": "application/json"},
+                timeout=self.timeout,
+            )
+        except requests.exceptions.RequestException as exc:
+            logger.warning(f"No se pudo generar el embedding en {self.host}: {exc}")
+            raise OllamaUnavailableError(str(exc)) from exc
+
+        if resp.status_code != 200:
+            raise OllamaUnavailableError(f"Ollama devolvió status {resp.status_code} en /api/embed: {resp.text[:200]}")
+
+        data = resp.json()
+        embeddings = data.get("embeddings") or []
+        return embeddings[0] if embeddings else []

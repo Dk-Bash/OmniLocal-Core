@@ -5,6 +5,8 @@ from memory.manager import MemoryManager
 from knowledge.manager import KnowledgeManager
 from retrieval.models import RetrievalResult
 from retrieval.textutils import extract_keywords
+from local_ai.embeddings import cosine_similarity
+from local_ai.ollama_client import OllamaUnavailableError
 
 
 class RetrievalEngine:
@@ -19,6 +21,11 @@ class RetrievalEngine:
     contiene. Esto permite encontrar "mi nombre es Marcelo" al preguntar
     "¿cómo me llamo?", donde ninguna de las dos frases aparece completa
     dentro de la otra.
+
+    Bloque 3 (Memory Ranking Intelligence): el ranking de memorias además
+    pondera por `importance`, no solo por coincidencia de palabras clave
+    (ver docstring de search_memory). El conocimiento (search_knowledge)
+    no se modificó: KnowledgeNode no tiene campo de importancia.
     """
 
     def __init__(
@@ -40,7 +47,16 @@ class RetrievalEngine:
         """
         Busca recuerdos por superposición de palabras clave con la consulta.
         Devuelve una lista de RetrievalResult con source_type="memory",
-        ordenada de mayor a menor cantidad de palabras clave coincidentes.
+        ordenada de mayor a menor relevancia.
+
+        Bloque 3 (Memory Ranking Intelligence): el score ya no depende solo
+        de cuántas palabras clave coinciden -- también pesa la importancia
+        de la memoria (`Memory.importance`, 0.0-1.0). Una memoria marcada
+        como más importante (ej. un hecho guardado explícitamente) rankea
+        por encima de una charla genérica vieja con la misma coincidencia
+        de palabras. El multiplicador de importancia queda acotado a
+        [0.5, 1.0] para que una coincidencia real de palabras clave nunca
+        llegue a score 0 solo porque la importancia es baja.
         """
         keywords = extract_keywords(query)
         if not keywords:
@@ -55,10 +71,13 @@ class RetrievalEngine:
                 matches[mem.id] = mem
                 hit_count[mem.id] += 1
 
-        results = [
-            RetrievalResult(id=mem.id, source_type="memory", content=mem.content, score=hit_count[mem.id] / len(keywords))
-            for mem_id, mem in matches.items()
-        ]
+        results = []
+        for mem_id, mem in matches.items():
+            keyword_score = hit_count[mem_id] / len(keywords)
+            importance_multiplier = 0.5 + 0.5 * mem.importance
+            results.append(
+                RetrievalResult(id=mem.id, source_type="memory", content=mem.content, score=keyword_score * importance_multiplier)
+            )
         results.sort(key=lambda r: r.score, reverse=True)
         return results
 
@@ -98,6 +117,41 @@ class RetrievalEngine:
         ]
         results.sort(key=lambda r: r.score, reverse=True)
         return results
+
+    def search_semantic(self, query: str, ollama, top_k: int = 5, min_similarity: float = 0.5) -> List[RetrievalResult]:
+        """
+        Bloque 4A: búsqueda por similitud de embeddings (comprensión
+        semántica real, no por palabras clave). Completamente separada de
+        `search()` -- todavía no se usa en el flujo de conversación (eso
+        queda para el Bloque 4B). Existe para poder probarse y validarse
+        de forma aislada, sin tocar el camino ya probado y en uso.
+
+        Requiere que las memorias ya tengan un embedding guardado (ver
+        local_ai/embeddings.py). Si Ollama o el modelo de embeddings no
+        están disponibles, devuelve una lista vacía en vez de fallar.
+        """
+        if not ollama.has_embedding_model():
+            return []
+        try:
+            query_vector = ollama.embed(query)
+        except OllamaUnavailableError:
+            return []
+        if not query_vector:
+            return []
+
+        rows = self.memory_manager.db_manager.get_all_memory_embeddings()
+        scored: List[RetrievalResult] = []
+        for row in rows:
+            similarity = cosine_similarity(query_vector, row["vector"])
+            if similarity < min_similarity:
+                continue
+            memory = self.memory_manager.get_memory(row["memory_id"])
+            if memory is None:
+                continue
+            scored.append(RetrievalResult(id=memory.id, source_type="memory_semantic", content=memory.content, score=similarity))
+
+        scored.sort(key=lambda r: r.score, reverse=True)
+        return scored[:top_k]
 
     def search(self, query: str) -> List[RetrievalResult]:
         """

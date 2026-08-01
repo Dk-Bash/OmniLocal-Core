@@ -30,4 +30,7 @@ DATABASE_PATH = os.path.join(DATA_DIR, "omnilocal.db")
 # usuario, sin conexión a servicios externos ni consumo de créditos/cuota.
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
+# Modelo de embeddings (Bloque 4A) -- separado del modelo de lenguaje.
+# nomic-embed-text: ~274MB, liviano y suficiente para esta escala.
+OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
 OLLAMA_TIMEOUT_SECONDS = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))

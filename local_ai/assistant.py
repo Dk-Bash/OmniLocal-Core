@@ -37,6 +37,7 @@ from app.core.engine import OmniLocalEngine
 from local_ai.ollama_client import OllamaClient, OllamaUnavailableError
 from local_ai.memory_detector import detect_memory_candidate
 from local_ai.context_builder import build_context
+from local_ai.embeddings import generate_and_store_embedding_async
 from app.logger import get_logger
 
 logger = get_logger(__name__)
@@ -71,7 +72,9 @@ class LocalAssistant:
     # ------------------------------------------------------------------
     def remember(self, content: str, memory_type: str = "hecho", importance: float = 0.7) -> int:
         """Guarda algo explícitamente en la memoria local, a pedido del usuario."""
-        return self.engine.save_memory(content=content, memory_type=memory_type, importance=importance)
+        mem_id = self.engine.save_memory(content=content, memory_type=memory_type, importance=importance)
+        self._embed_async(mem_id, content)
+        return mem_id
 
     def feedback(self, conversation_id: int, useful: bool) -> None:
         """Registra si una respuesta fue útil o no. Insumo para mejorar el sistema a futuro."""
@@ -97,9 +100,10 @@ class LocalAssistant:
         # nuevo ("trabajo en ICQA") se perdía sin guardarse nunca.
         candidate = detect_memory_candidate(query, ollama=self.ollama)
         if candidate is not None:
-            self.engine.save_memory(
+            mem_id = self.engine.save_memory(
                 content=candidate.content, memory_type=candidate.memory_type, importance=candidate.importance
             )
+            self._embed_async(mem_id, candidate.content)
             answer = self._generate_with_model(query, context_chunks)
             if answer is None:
                 answer = f"Listo, lo guardé: {candidate.content}"
@@ -139,10 +143,24 @@ class LocalAssistant:
         # genérica de conversación (acá no hubo un dato puntual detectado).
         conv_id = None
         if save:
-            self.engine.save_memory(content=f"P: {query}\nR: {answer}", memory_type="conversacion", importance=0.4)
+            generic_content = f"P: {query}\nR: {answer}"
+            mem_id = self.engine.save_memory(content=generic_content, memory_type="conversacion", importance=0.4)
+            self._embed_async(mem_id, generic_content)
             conv_id = self._log_conversation(query, answer, session_id)
 
         return AssistantAnswer(answer=answer, source="modelo_ia", used_model=True, context_used=context_chunks, conversation_id=conv_id)
+
+    def _embed_async(self, memory_id: int, content: str) -> None:
+        """
+        Dispara la generación del embedding de una memoria en segundo plano
+        (Bloque 4A). No bloquea la respuesta al usuario: si Ollama no tiene
+        el modelo de embeddings, o falla, la memoria queda igual guardada
+        (solo que sin vector todavía). Ver local_ai/embeddings.py.
+        """
+        try:
+            generate_and_store_embedding_async(self.engine, memory_id, content, self.ollama)
+        except Exception as exc:  # nunca debe romper el flujo principal de la conversación
+            logger.warning(f"No se pudo iniciar la generación de embedding en segundo plano: {exc}")
 
     def _generate_with_model(self, query: str, context_chunks: List[str]) -> Optional[str]:
         """Llama al modelo local; devuelve None si no hay respuesta aprovechable (sin lanzar excepción)."""
