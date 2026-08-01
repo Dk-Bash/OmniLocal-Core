@@ -34,6 +34,17 @@ contexto que se le pasa al modelo ya no es solo memoria/conocimiento
 el modelo pueda resolver referencias como "agregale memoria a ESO" cuando
 "eso" se mencionó en el mensaje anterior de la misma charla. Sesiones
 distintas nunca se mezclan entre sí.
+Bloque 5 (Semantic Retrieval Integration, ver retrieval/hybrid.py): el
+contexto final que recibe el modelo, cuando hace falta llamarlo, se
+enriquece con búsqueda semántica combinada con la léxica -- nunca antes
+de descartar coincidencia directa o detección de hechos.
+
+Bloque 6 (Adaptive Memory Consolidation, ver local_ai/memory_consolidation.py):
+los hechos detectados por reglas ya no se insertan a ciegas -- nombre y
+ocupación se actualizan en el lugar (con historial de qué decían antes);
+proyecto, preferencia y otros se deduplican pero nunca se sobreescriben
+entre sí. Además se registra, de forma aproximada, qué memorias fueron
+relevantes para cada turno de conversación (conversation_memory_usage).
 """
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -41,8 +52,10 @@ from typing import List, Optional
 from app.core.engine import OmniLocalEngine
 from local_ai.ollama_client import OllamaClient, OllamaUnavailableError
 from local_ai.memory_detector import detect_by_rules
+from local_ai.memory_consolidation import consolidate_fact
 from local_ai.context_builder import build_context
 from local_ai.embeddings import generate_and_store_embedding_async
+from retrieval.hybrid import hybrid_context
 from app.logger import get_logger
 
 logger = get_logger(__name__)
@@ -113,9 +126,7 @@ class LocalAssistant:
         # que no tienen ese costo.
         rule_candidate = detect_by_rules(query)
         if rule_candidate is not None:
-            mem_id = self.engine.save_memory(
-                content=rule_candidate.content, memory_type=rule_candidate.memory_type, importance=rule_candidate.importance
-            )
+            mem_id = consolidate_fact(self.engine, rule_candidate, ollama=self.ollama)
             self._embed_async(mem_id, rule_candidate.content)
             answer = self._generate_with_model(query, context_chunks) if self.ollama.ensure_running() else None
             if answer is None:
@@ -124,12 +135,14 @@ class LocalAssistant:
             else:
                 source, used_model = "modelo_ia", True
             conv_id = self._log_conversation(query, answer, session_id) if save else None
+            self._log_memory_usage(conv_id, results)
             return AssistantAnswer(answer=answer, source=source, used_model=used_model, context_used=context_chunks, conversation_id=conv_id)
 
         # Paso 1: ¿hay una coincidencia directa ya guardada? No se usa el modelo.
         direct = self._find_direct_match(query, results)
         if direct is not None:
             conv_id = self._log_conversation(query, direct, session_id) if save else None
+            self._log_memory_usage(conv_id, results)
             return AssistantAnswer(answer=direct, source="memoria_local", used_model=False, conversation_id=conv_id)
 
         # Paso 2: no hay coincidencia directa -> usar el contexto ya armado para RAG.
@@ -142,6 +155,16 @@ class LocalAssistant:
                 "respuesta con '/recordar <texto>'."
             )
             return AssistantAnswer(answer=fallback, source="sin_modelo", context_used=context_chunks)
+
+        # Bloque 5 (Semantic Retrieval Integration): recién acá, con Ollama ya
+        # confirmado disponible y sabiendo que sí o sí se va a llamar al
+        # modelo, se enriquece el contexto con búsqueda semántica (híbrida
+        # con lo léxico). Nunca antes de este punto: ni la detección de
+        # hechos por reglas ni la coincidencia directa deben gastar
+        # embeddings. Si no hay modelo de embeddings o algo falla,
+        # hybrid_context devuelve context_chunks tal cual (mismo
+        # comportamiento que antes de este bloque).
+        context_chunks = hybrid_context(self.engine, query, self.ollama, context_chunks)
 
         answer = self._generate_with_model(query, context_chunks)
         if answer is None:
@@ -160,8 +183,26 @@ class LocalAssistant:
             mem_id = self.engine.save_memory(content=generic_content, memory_type="conversacion", importance=0.4)
             self._embed_async(mem_id, generic_content)
             conv_id = self._log_conversation(query, answer, session_id)
+            self._log_memory_usage(conv_id, results)
 
         return AssistantAnswer(answer=answer, source="modelo_ia", used_model=True, context_used=context_chunks, conversation_id=conv_id)
+
+    def _log_memory_usage(self, conv_id: Optional[int], results) -> None:
+        """
+        Trazabilidad aproximada (Bloque 6): registra qué memorias eran
+        relevantes para la consulta de este turno. Es una aproximación (no
+        necesariamente exactamente lo que terminó en el prompt final del
+        modelo, que puede truncarse en build_context/hybrid_context) --
+        deliberado, para no tener que tocar esos dos módulos ya estables.
+        """
+        if not conv_id or not results:
+            return
+        try:
+            for r in results:
+                if r.source_type == "memory" and r.id is not None:
+                    self.engine.db_manager.insert_conversation_memory_usage(conv_id, r.id)
+        except Exception as exc:  # nunca debe romper el flujo principal de la conversación
+            logger.warning(f"No se pudo registrar la trazabilidad de memoria: {exc}")
 
     def _embed_async(self, memory_id: int, content: str) -> None:
         """
@@ -183,8 +224,6 @@ class LocalAssistant:
             logger.warning(f"Fallo al generar respuesta con el modelo local: {exc}")
             return None
         return answer.strip() if answer and answer.strip() else None
-
-        return AssistantAnswer(answer=answer, source="modelo_ia", used_model=True, context_used=context_chunks, conversation_id=conv_id)
 
     # ------------------------------------------------------------------
     # Internos

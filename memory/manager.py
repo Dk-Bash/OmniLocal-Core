@@ -49,6 +49,25 @@ class MemoryManager:
         created_id = cursor.lastrowid
         return created_id
 
+    def update_memory(
+        self,
+        memory_id: int,
+        content: str,
+        importance: Optional[float] = None,
+        confidence: Optional[float] = None,
+    ) -> bool:
+        """
+        Actualiza el contenido de una memoria existente (Bloque 6 -- Adaptive
+        Memory Consolidation). Valida con Pydantic antes de escribir, mismo
+        criterio que save_memory().
+        """
+        if importance is not None or confidence is not None:
+            current = self.get_memory(memory_id)
+            check_importance = importance if importance is not None else (current.importance if current else 0.5)
+            check_confidence = confidence if confidence is not None else (current.confidence if current else 1.0)
+            Memory(content=content, importance=check_importance, confidence=check_confidence)
+        return self.db_manager.update_memory(memory_id, content, importance=importance, confidence=confidence)
+
     def get_memory(self, memory_id: int) -> Optional[Memory]:
         """
         Recupera un recuerdo por su ID y devuelve una instancia del modelo Memory o None si no existe.

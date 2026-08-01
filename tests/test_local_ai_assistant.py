@@ -135,6 +135,53 @@ def test_new_declaration_without_availability_never_calls_generate(engine):
     assert result.source == "memoria_local"
 
 
+def test_direct_match_never_calls_embeddings_or_semantic_search(engine):
+    """Bloque 5, Caso 4: si hay coincidencia directa, no debe llamarse ni
+    embed() ni search_semantic() -- ni siquiera con el modelo de embeddings
+    genuinamente disponible (misma lección que la regresión anterior con
+    generate())."""
+    assistant = LocalAssistant(engine=engine)
+    assistant.remember("El wifi de casa es RedCasa123")
+
+    with patch.object(OllamaClient, "is_available", return_value=True), \
+         patch.object(OllamaClient, "has_embedding_model", return_value=True), \
+         patch.object(OllamaClient, "embed") as mock_embed, \
+         patch("local_ai.assistant.hybrid_context") as mock_hybrid:
+        result = assistant.ask("RedCasa123")
+
+    mock_embed.assert_not_called()
+    mock_hybrid.assert_not_called()
+    assert result.source == "memoria_local"
+
+
+def test_new_declaration_never_calls_embeddings_for_the_answer(engine):
+    """Bloque 5, Caso 4 (extendido): la rama de declaración nueva tampoco
+    debe pasar por la capa híbrida -- guarda y responde sin buscar
+    semánticamente."""
+    assistant = LocalAssistant(engine=engine)
+
+    with patch.object(OllamaClient, "is_available", return_value=True), \
+         patch.object(OllamaClient, "generate", return_value="dale, anotado"), \
+         patch("local_ai.assistant.hybrid_context") as mock_hybrid:
+        assistant.ask("Mi nombre es Marcelo y trabajo en ICQA")
+
+    mock_hybrid.assert_not_called()
+
+
+def test_general_path_without_direct_match_does_use_hybrid_context(engine):
+    """Contraparte del Caso 4: cuando SÍ hace falta llamar al modelo (sin
+    match directo, sin dato de regla), la capa híbrida debe invocarse."""
+    assistant = LocalAssistant(engine=engine)
+
+    with patch.object(OllamaClient, "is_available", return_value=True), \
+         patch.object(OllamaClient, "generate", return_value="respuesta generica"), \
+         patch("local_ai.assistant.hybrid_context") as mock_hybrid:
+        mock_hybrid.side_effect = lambda engine, query, ollama, base_context_chunks, **kw: base_context_chunks
+        assistant.ask("una pregunta cualquiera sin datos personales")
+
+    mock_hybrid.assert_called_once()
+
+
 def test_new_declaration_saved_even_without_model_available(engine):
     """El dato nuevo se guarda igual aunque no haya modelo disponible."""
     assistant = LocalAssistant(engine=engine)

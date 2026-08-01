@@ -94,12 +94,22 @@ class Memory(BaseModel):
     """
     Modelo Pydantic que representa una entidad de recuerdo en el sistema.
     La importancia debe estar comprendida estrictamente entre 0.0 y 1.0.
+
+    Bloque 6 (Adaptive Memory Consolidation): `confidence` es distinto de
+    `importance` -- importancia es cuánto pesa en el ranking (Bloque 3);
+    confianza es qué tan seguro está el sistema de que el dato sigue
+    vigente (por ahora siempre 1.0 al detectarse por reglas, que son
+    determinísticas; queda la puerta abierta para que feedback futuro la
+    ajuste sin tocar el ranking). `updated_at` distingue "cuándo se creó"
+    de "cuándo se confirmó/corrigió por última vez".
     """
     id: Optional[int] = None
     content: str
     memory_type: str = "episodic"
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: Optional[datetime] = None
 
     @field_validator("importance")
     def validate_importance(cls, value: float) -> float:

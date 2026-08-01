@@ -705,6 +705,7 @@ class SQLiteManager:
         """)
 
         self._migrate_conversations_session_id(cursor)
+        self._migrate_memories_updated_at_confidence(cursor)
 
         # 50. Tabla memory_embeddings (Bloque 4A -- Semantic Retrieval, aditiva)
         cursor.execute("""
@@ -716,7 +717,37 @@ class SQLiteManager:
             );
         """)
 
+        # 51. Tabla memory_history (Bloque 6 -- Adaptive Memory Consolidation)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS memory_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                memory_id INTEGER NOT NULL,
+                previous_content TEXT NOT NULL,
+                new_content TEXT NOT NULL,
+                changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 52. Tabla conversation_memory_usage (trazabilidad aproximada, Bloque 6)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS conversation_memory_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id INTEGER NOT NULL,
+                memory_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         self.conn.commit()
+
+    def _migrate_memories_updated_at_confidence(self, cursor) -> None:
+        """Agrega updated_at y confidence a memories si la tabla ya existía sin ellas (Bloque 6)."""
+        cursor.execute("PRAGMA table_info(memories);")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "updated_at" not in columns:
+            cursor.execute("ALTER TABLE memories ADD COLUMN updated_at TIMESTAMP;")
+        if "confidence" not in columns:
+            cursor.execute("ALTER TABLE memories ADD COLUMN confidence REAL DEFAULT 1.0;")
 
     def _migrate_conversations_session_id(self, cursor) -> None:
         """Agrega la columna session_id a conversations si la tabla ya existía sin ella (bases previas a la interfaz web)."""
@@ -806,6 +837,79 @@ class SQLiteManager:
         cursor.execute(
             "SELECT * FROM memories WHERE content LIKE ? ORDER BY id ASC;",
             (f"%{query}%",)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones para Adaptive Memory Consolidation (Bloque 6)
+    # ----------------------------------------------------
+    def update_memory(
+        self,
+        memory_id: int,
+        content: str,
+        importance: Optional[float] = None,
+        confidence: Optional[float] = None,
+    ) -> bool:
+        """Actualiza el contenido (y opcionalmente importancia/confianza) de una memoria existente."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if importance is not None and confidence is not None:
+            cursor.execute(
+                "UPDATE memories SET content = ?, importance = ?, confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
+                (content, importance, confidence, memory_id)
+            )
+        elif importance is not None:
+            cursor.execute(
+                "UPDATE memories SET content = ?, importance = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
+                (content, importance, memory_id)
+            )
+        elif confidence is not None:
+            cursor.execute(
+                "UPDATE memories SET content = ?, confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
+                (content, confidence, memory_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE memories SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
+                (content, memory_id)
+            )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def insert_memory_history(self, memory_id: int, previous_content: str, new_content: str) -> int:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO memory_history (memory_id, previous_content, new_content) VALUES (?, ?, ?);",
+            (memory_id, previous_content, new_content)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_memory_history(self, memory_id: int) -> list:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM memory_history WHERE memory_id = ? ORDER BY id ASC;", (memory_id,))
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def insert_conversation_memory_usage(self, conversation_id: int, memory_id: int) -> int:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO conversation_memory_usage (conversation_id, memory_id) VALUES (?, ?);",
+            (conversation_id, memory_id)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_conversation_memory_usage(self, conversation_id: int) -> list:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM conversation_memory_usage WHERE conversation_id = ? ORDER BY id ASC;",
+            (conversation_id,)
         )
         rows = cursor.fetchall()
         return [dict(row) for row in rows]

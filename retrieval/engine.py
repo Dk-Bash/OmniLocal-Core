@@ -81,6 +81,35 @@ class RetrievalEngine:
         results.sort(key=lambda r: r.score, reverse=True)
         return results
 
+    def search_memory_lexical(self, query: str) -> List[RetrievalResult]:
+        """
+        Igual que search_memory(), pero SIN el multiplicador de importancia
+        del Bloque 3 -- devuelve el score léxico "puro" (superposición de
+        palabras clave, 0.0-1.0). Existe para la capa híbrida (Bloque 5,
+        ver retrieval/hybrid.py), que necesita keyword_score, semantic_score
+        e importance como tres entradas independientes, sin contar la
+        importancia dos veces. No modifica ni es usado por search_memory();
+        es un método hermano, completamente aditivo.
+        """
+        keywords = extract_keywords(query)
+        if not keywords:
+            memories = self.memory_manager.search_memories(query)
+            return [RetrievalResult(id=m.id, source_type="memory", content=m.content, score=1.0) for m in memories]
+
+        matches: Dict[int, dict] = {}
+        hit_count: Dict[int, int] = defaultdict(int)
+        for kw in keywords:
+            for mem in self.memory_manager.search_memories(kw):
+                matches[mem.id] = mem
+                hit_count[mem.id] += 1
+
+        results = [
+            RetrievalResult(id=mem.id, source_type="memory", content=mem.content, score=hit_count[mem_id] / len(keywords))
+            for mem_id, mem in matches.items()
+        ]
+        results.sort(key=lambda r: r.score, reverse=True)
+        return results
+
     def search_knowledge(self, query: str) -> List[RetrievalResult]:
         """
         Busca nodos de conocimiento por superposición de palabras clave.
