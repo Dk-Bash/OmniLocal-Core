@@ -104,6 +104,37 @@ def test_new_declaration_is_not_masked_by_unrelated_old_memory(engine):
     assert "ICQA" in hechos[0].content
 
 
+def test_direct_match_never_calls_generate_even_with_ollama_really_available(engine):
+    """Regresión: si Ollama está realmente disponible (is_available=True),
+    el detector no debe gastar una llamada a generate() para clasificar
+    cuando la respuesta ya existe en memoria directa. Antes de este fix,
+    detect_memory_candidate probaba el camino con modelo primero, y con
+    Ollama de verdad corriendo eso contaba como una llamada real."""
+    assistant = LocalAssistant(engine=engine)
+    assistant.remember("El wifi de casa es RedCasa123")
+
+    with patch.object(OllamaClient, "is_available", return_value=True), \
+         patch.object(OllamaClient, "generate") as mock_generate:
+        result = assistant.ask("RedCasa123")
+
+    mock_generate.assert_not_called()
+    assert result.source == "memoria_local"
+
+
+def test_new_declaration_without_availability_never_calls_generate(engine):
+    """Regresión: si is_available() dice que no hay modelo, la rama de
+    declaración nueva no debe intentar generate() en absoluto (antes lo
+    intentaba sin chequear disponibilidad primero, a diferencia del resto
+    del flujo)."""
+    assistant = LocalAssistant(engine=engine)
+    with patch.object(OllamaClient, "is_available", return_value=False), \
+         patch.object(OllamaClient, "generate") as mock_generate:
+        result = assistant.ask("Mi nombre es Marcelo y trabajo en ICQA")
+
+    mock_generate.assert_not_called()
+    assert result.source == "memoria_local"
+
+
 def test_new_declaration_saved_even_without_model_available(engine):
     """El dato nuevo se guarda igual aunque no haya modelo disponible."""
     assistant = LocalAssistant(engine=engine)

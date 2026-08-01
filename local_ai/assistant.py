@@ -18,10 +18,15 @@ Estrategia para no depender del modelo salvo que haga falta:
    con el uso, sin ningún componente externo.
 
 Bloque 1 (memoria automática, ver local_ai/memory_detector.py): antes de
-guardar la respuesta como charla genérica, se le pregunta al detector si lo
-que escribió el usuario contiene un dato reutilizable (nombre, ocupación,
-proyecto, preferencia). Si lo encuentra, se guarda como "hecho" con más
-peso; si no, se conserva el comportamiento anterior.
+guardar la respuesta como charla genérica, se revisa (con reglas, sin
+gastar el modelo) si lo que escribió el usuario contiene un dato
+reutilizable (nombre, ocupación, proyecto, preferencia). Si lo encuentra,
+se guarda como "hecho" con más peso; si no, se conserva el comportamiento
+anterior. `detect_by_model` (clasificación vía IA) existe y está probado en
+local_ai/memory_detector.py, pero no se invoca desde este flujo en vivo: se
+gastaba una llamada al modelo para clasificar aunque la respuesta ya
+existiera guardada, rompiendo la prioridad "si hay memoria directa, nunca
+se usa el modelo".
 
 Bloque 2 (contexto conversacional, ver local_ai/context_builder.py): el
 contexto que se le pasa al modelo ya no es solo memoria/conocimiento
@@ -35,7 +40,7 @@ from typing import List, Optional
 
 from app.core.engine import OmniLocalEngine
 from local_ai.ollama_client import OllamaClient, OllamaUnavailableError
-from local_ai.memory_detector import detect_memory_candidate
+from local_ai.memory_detector import detect_by_rules
 from local_ai.context_builder import build_context
 from local_ai.embeddings import generate_and_store_embedding_async
 from app.logger import get_logger
@@ -98,15 +103,23 @@ class LocalAssistant:
         # Marcelo y trabajo en ICQA" podía terminar devolviendo una charla
         # vieja no relacionada (por compartir la palabra "nombre") y el dato
         # nuevo ("trabajo en ICQA") se perdía sin guardarse nunca.
-        candidate = detect_memory_candidate(query, ollama=self.ollama)
-        if candidate is not None:
+        #
+        # Se usa acá SOLO el camino de reglas (detect_by_rules), no
+        # detect_memory_candidate completo: ese último intenta primero
+        # clasificar con el modelo, lo que rompía la prioridad "si ya hay
+        # memoria directa, nunca se usa el modelo" -- el detector gastaba
+        # una llamada a Ollama para clasificar aunque la respuesta ya
+        # existiera guardada. Las reglas son instantáneas y sin red, así
+        # que no tienen ese costo.
+        rule_candidate = detect_by_rules(query)
+        if rule_candidate is not None:
             mem_id = self.engine.save_memory(
-                content=candidate.content, memory_type=candidate.memory_type, importance=candidate.importance
+                content=rule_candidate.content, memory_type=rule_candidate.memory_type, importance=rule_candidate.importance
             )
-            self._embed_async(mem_id, candidate.content)
-            answer = self._generate_with_model(query, context_chunks)
+            self._embed_async(mem_id, rule_candidate.content)
+            answer = self._generate_with_model(query, context_chunks) if self.ollama.ensure_running() else None
             if answer is None:
-                answer = f"Listo, lo guardé: {candidate.content}"
+                answer = f"Listo, lo guardé: {rule_candidate.content}"
                 source, used_model = "memoria_local", False
             else:
                 source, used_model = "modelo_ia", True
