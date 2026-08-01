@@ -11,6 +11,7 @@ def main():
     engine = OmniLocalEngine()
     engine.start()
     print("OmniLocal Core v0.1 iniciado correctamente")
+    print("Para usar el asistente interactivo: python app/cli.py")
 
 
 if __name__ == "__main__":

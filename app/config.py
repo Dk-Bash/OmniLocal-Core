@@ -1,5 +1,11 @@
 import os
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # Configuración básica para OmniLocal-Core
 PROJECT_NAME = "OmniLocal-Core"
 VERSION = "0.1.0"
@@ -19,3 +25,9 @@ TESTS_DIR = os.path.join(BASE_DIR, "tests")
 
 # Ruta de la base de datos SQLite
 DATABASE_PATH = os.path.join(DATA_DIR, "omnilocal.db")
+
+# Configuración del motor de IA local (Ollama). Corre 100% en la máquina del
+# usuario, sin conexión a servicios externos ni consumo de créditos/cuota.
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
+OLLAMA_TIMEOUT_SECONDS = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))

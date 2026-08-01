@@ -24,7 +24,11 @@ class SQLiteManager:
     def connect(self) -> sqlite3.Connection:
         """Establece y devuelve una conexión a la base de datos SQLite."""
         if self.conn is None:
-            self.conn = sqlite3.connect(self.db_path)
+            # check_same_thread=False: la interfaz web (FastAPI) atiende cada
+            # request en un hilo del threadpool, y esta app corre de forma
+            # local y de un solo usuario a la vez, así que reusar la misma
+            # conexión entre hilos es seguro para este caso de uso.
+            self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
             # Habilitar soporte para tipos de fecha y claves foráneas si fuera necesario
             self.conn.row_factory = sqlite3.Row
         return self.conn
@@ -62,7 +66,39 @@ class SQLiteManager:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_input TEXT NOT NULL,
                 assistant_response TEXT NOT NULL,
+                session_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 3.1 Tabla chat_sessions (charlas con nombre, para la interfaz web)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 3.2 Tabla feedback (útil / no útil por respuesta, insumo para mejorar)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id INTEGER NOT NULL,
+                useful INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # 3.3 Tabla sources (carpetas/archivos locales registrados para ingestión)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL UNIQUE,
+                file_count INTEGER DEFAULT 0,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_indexed_at TIMESTAMP
             );
         """)
 
@@ -668,61 +704,16 @@ class SQLiteManager:
             );
         """)
 
-        # 50. Tabla runtime_plan_simulations (Runtime Block 12)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS runtime_plan_simulations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                plan_id INTEGER DEFAULT 0,
-                simulation_status TEXT NOT NULL,
-                predicted_outcome TEXT DEFAULT '',
-                predicted_issues TEXT DEFAULT '',
-                confidence REAL DEFAULT 0.0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
-        # 51. Tabla runtime_plan_validations (Runtime Block 12)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS runtime_plan_validations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                plan_id INTEGER DEFAULT 0,
-                validation_status TEXT NOT NULL,
-                risk_level TEXT DEFAULT 'low',
-                checks_performed TEXT DEFAULT '[]',
-                failed_checks TEXT DEFAULT '[]',
-                recommendation TEXT DEFAULT '',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
-        # 52. Tabla runtime_execution_authorizations (Runtime Block 13)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS runtime_execution_authorizations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                plan_id INTEGER DEFAULT 0,
-                validation_id INTEGER DEFAULT 0,
-                authorization_status TEXT NOT NULL,
-                authorization_level TEXT DEFAULT 'normal',
-                approved_conditions TEXT DEFAULT '[]',
-                rejected_conditions TEXT DEFAULT '[]',
-                reasoning TEXT DEFAULT '',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
-        # 53. Tabla runtime_authorization_conditions (Runtime Block 13)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS runtime_authorization_conditions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                authorization_id INTEGER DEFAULT 0,
-                condition_name TEXT NOT NULL,
-                condition_status TEXT NOT NULL,
-                description TEXT DEFAULT '',
-                severity TEXT DEFAULT 'info'
-            );
-        """)
+        self._migrate_conversations_session_id(cursor)
 
         self.conn.commit()
+
+    def _migrate_conversations_session_id(self, cursor) -> None:
+        """Agrega la columna session_id a conversations si la tabla ya existía sin ella (bases previas a la interfaz web)."""
+        cursor.execute("PRAGMA table_info(conversations);")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "session_id" not in columns:
+            cursor.execute("ALTER TABLE conversations ADD COLUMN session_id INTEGER;")
 
     # ----------------------------------------------------
     # Operaciones CRUD para Knowledge Layer (Módulo 7)
@@ -819,6 +810,170 @@ class SQLiteManager:
         )
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Conversations (capa de IA local)
+    # ----------------------------------------------------
+    def insert_conversation(
+        self,
+        user_input: str,
+        assistant_response: str,
+        session_id: Optional[int] = None,
+        created_at: Optional[str] = None,
+    ) -> int:
+        """Inserta un turno de conversación (pregunta + respuesta) y devuelve su ID."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if created_at is None:
+            cursor.execute(
+                "INSERT INTO conversations (user_input, assistant_response, session_id) VALUES (?, ?, ?);",
+                (user_input, assistant_response, session_id)
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO conversations (user_input, assistant_response, session_id, created_at) VALUES (?, ?, ?, ?);",
+                (user_input, assistant_response, session_id, created_at)
+            )
+        conn.commit()
+        if session_id is not None:
+            self.touch_chat_session(session_id)
+        return cursor.lastrowid
+
+    def get_conversations(self, limit: Optional[int] = None, session_id: Optional[int] = None) -> list:
+        """Obtiene el historial de conversaciones, más recientes primero. Opcionalmente filtrado por sesión."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        query = "SELECT * FROM conversations"
+        params: list = []
+        if session_id is not None:
+            query += " WHERE session_id = ?"
+            params.append(session_id)
+        query += " ORDER BY id ASC" if session_id is not None else " ORDER BY id DESC"
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+        cursor.execute(query + ";", params)
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def search_conversations(self, query: str) -> list:
+        """Busca en el historial de conversaciones por coincidencia de texto (LIKE)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM conversations WHERE user_input LIKE ? OR assistant_response LIKE ? ORDER BY id DESC;",
+            (f"%{query}%", f"%{query}%")
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Chat Sessions (charlas con nombre, interfaz web)
+    # ----------------------------------------------------
+    def insert_chat_session(self, title: str) -> int:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO chat_sessions (title) VALUES (?);", (title,))
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_chat_sessions(self) -> list:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM chat_sessions ORDER BY updated_at DESC, id DESC;")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def get_chat_session(self, session_id: int) -> Optional[dict]:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM chat_sessions WHERE id = ?;", (session_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def touch_chat_session(self, session_id: int) -> None:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
+            (session_id,)
+        )
+        conn.commit()
+
+    def rename_chat_session(self, session_id: int, title: str) -> None:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE chat_sessions SET title = ? WHERE id = ?;", (title, session_id))
+        conn.commit()
+
+    def delete_chat_session(self, session_id: int) -> None:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM conversations WHERE session_id = ?;", (session_id,))
+        cursor.execute("DELETE FROM chat_sessions WHERE id = ?;", (session_id,))
+        conn.commit()
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Feedback (útil / no útil por respuesta)
+    # ----------------------------------------------------
+    def insert_chat_feedback(self, conversation_id: int, useful: bool) -> int:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO feedback (conversation_id, useful) VALUES (?, ?);",
+            (conversation_id, 1 if useful else 0)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_feedback_stats(self) -> dict:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT useful, COUNT(*) as c FROM feedback GROUP BY useful;")
+        rows = cursor.fetchall()
+        stats = {"useful": 0, "not_useful": 0}
+        for row in rows:
+            if row["useful"]:
+                stats["useful"] = row["c"]
+            else:
+                stats["not_useful"] = row["c"]
+        return stats
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Sources (carpetas locales registradas para ingestión)
+    # ----------------------------------------------------
+    def insert_source(self, path: str) -> int:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO sources (path) VALUES (?);",
+            (path,)
+        )
+        conn.commit()
+        cursor.execute("SELECT id FROM sources WHERE path = ?;", (path,))
+        return cursor.fetchone()["id"]
+
+    def get_sources(self) -> list:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM sources ORDER BY id ASC;")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_source(self, source_id: int) -> None:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM sources WHERE id = ?;", (source_id,))
+        conn.commit()
+
+    def update_source_index_stats(self, path: str, file_count: int) -> None:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE sources SET file_count = ?, last_indexed_at = CURRENT_TIMESTAMP WHERE path = ?;",
+            (file_count, path)
+        )
+        conn.commit()
 
     # ----------------------------------------------------
     # Operaciones CRUD para Context Engine (Módulo 10)
@@ -3951,7 +4106,7 @@ class SQLiteManager:
     # ----------------------------------------------------
     # CRUD para Autonomous Planning Layer (Runtime Block 11)
     # ----------------------------------------------------
-    def insert_execution_plan(
+    def insert_runtime_execution_plan(
         self,
         plan_type: str,
         source_decision_id: int = 0,
@@ -3977,8 +4132,8 @@ class SQLiteManager:
         conn.commit()
         return cursor.lastrowid
 
-    def get_execution_plan(self, plan_id: int) -> Optional[dict]:
-        """Obtiene un plan de ejecución por su ID."""
+    def get_runtime_execution_plan(self, plan_id: int) -> Optional[dict]:
+        """Obtiene un plan de ejecución autónomo (runtime) por su ID."""
         conn = self.connect()
         cursor = conn.cursor()
         cursor.execute(
@@ -4002,8 +4157,8 @@ class SQLiteManager:
             "created_at": str(row["created_at"]),
         }
 
-    def get_execution_plans(self) -> list:
-        """Obtiene todos los planes de ejecución ordenados por ID descendente."""
+    def get_runtime_execution_plans(self) -> list:
+        """Obtiene todos los planes de ejecución autónomos (runtime) ordenados por ID descendente."""
         conn = self.connect()
         cursor = conn.cursor()
         cursor.execute(
@@ -4024,275 +4179,6 @@ class SQLiteManager:
                 "confidence": row["confidence"],
                 "reasoning": row["reasoning"],
                 "created_at": str(row["created_at"]),
-            })
-        return result
-
-    # --- Runtime Block 12: Plan Validation & Simulation CRUD ---
-
-    def insert_plan_simulation(
-        self,
-        plan_id: int,
-        simulation_status: str,
-        predicted_outcome: str = "",
-        predicted_issues: str = "",
-        confidence: float = 0.0
-    ) -> int:
-        """Inserta una simulación de plan en runtime_plan_simulations y devuelve su ID."""
-        conn = self.connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO runtime_plan_simulations
-            (plan_id, simulation_status, predicted_outcome, predicted_issues, confidence)
-            VALUES (?, ?, ?, ?, ?);
-            """,
-            (plan_id, simulation_status, predicted_outcome, predicted_issues, confidence)
-        )
-        conn.commit()
-        return cursor.lastrowid
-
-    def get_plan_simulation(self, simulation_id: int) -> Optional[dict]:
-        """Obtiene una simulación de plan por su ID."""
-        conn = self.connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT id, plan_id, simulation_status, predicted_outcome, predicted_issues, confidence, created_at
-            FROM runtime_plan_simulations WHERE id = ?;
-            """,
-            (simulation_id,)
-        )
-        row = cursor.fetchone()
-        if not row:
-            return None
-        return {
-            "id": row["id"],
-            "plan_id": row["plan_id"],
-            "simulation_status": row["simulation_status"],
-            "predicted_outcome": row["predicted_outcome"],
-            "predicted_issues": row["predicted_issues"],
-            "confidence": row["confidence"],
-            "created_at": str(row["created_at"]),
-        }
-
-    def get_plan_simulations(self) -> list:
-        """Obtiene todas las simulaciones de planes ordenadas por ID descendente."""
-        conn = self.connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT id, plan_id, simulation_status, predicted_outcome, predicted_issues, confidence, created_at
-            FROM runtime_plan_simulations ORDER BY id DESC;
-            """
-        )
-        rows = cursor.fetchall()
-        result = []
-        for row in rows:
-            result.append({
-                "id": row["id"],
-                "plan_id": row["plan_id"],
-                "simulation_status": row["simulation_status"],
-                "predicted_outcome": row["predicted_outcome"],
-                "predicted_issues": row["predicted_issues"],
-                "confidence": row["confidence"],
-                "created_at": str(row["created_at"]),
-            })
-        return result
-
-    def insert_plan_validation(
-        self,
-        plan_id: int,
-        validation_status: str,
-        risk_level: str = "low",
-        checks_performed: str = "[]",
-        failed_checks: str = "[]",
-        recommendation: str = ""
-    ) -> int:
-        """Inserta una validación de plan en runtime_plan_validations y devuelve su ID."""
-        conn = self.connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO runtime_plan_validations
-            (plan_id, validation_status, risk_level, checks_performed, failed_checks, recommendation)
-            VALUES (?, ?, ?, ?, ?, ?);
-            """,
-            (plan_id, validation_status, risk_level, checks_performed, failed_checks, recommendation)
-        )
-        conn.commit()
-        return cursor.lastrowid
-
-    def get_plan_validation(self, validation_id: int) -> Optional[dict]:
-        """Obtiene un reporte de validación de plan por su ID."""
-        conn = self.connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT id, plan_id, validation_status, risk_level, checks_performed, failed_checks, recommendation, created_at
-            FROM runtime_plan_validations WHERE id = ?;
-            """,
-            (validation_id,)
-        )
-        row = cursor.fetchone()
-        if not row:
-            return None
-        return {
-            "id": row["id"],
-            "plan_id": row["plan_id"],
-            "validation_status": row["validation_status"],
-            "risk_level": row["risk_level"],
-            "checks_performed": row["checks_performed"],
-            "failed_checks": row["failed_checks"],
-            "recommendation": row["recommendation"],
-            "created_at": str(row["created_at"]),
-        }
-
-    def get_plan_validations(self) -> list:
-        """Obtiene todas las validaciones de planes ordenadas por ID descendente."""
-        conn = self.connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT id, plan_id, validation_status, risk_level, checks_performed, failed_checks, recommendation, created_at
-            FROM runtime_plan_validations ORDER BY id DESC;
-            """
-        )
-        rows = cursor.fetchall()
-        result = []
-        for row in rows:
-            result.append({
-                "id": row["id"],
-                "plan_id": row["plan_id"],
-                "validation_status": row["validation_status"],
-                "risk_level": row["risk_level"],
-                "checks_performed": row["checks_performed"],
-                "failed_checks": row["failed_checks"],
-                "recommendation": row["recommendation"],
-                "created_at": str(row["created_at"]),
-            })
-        return result
-
-    # --- Runtime Block 13: Execution Authorization CRUD ---
-
-    def insert_execution_authorization(
-        self,
-        plan_id: int,
-        validation_id: int,
-        authorization_status: str,
-        authorization_level: str = "normal",
-        approved_conditions: str = "[]",
-        rejected_conditions: str = "[]",
-        reasoning: str = ""
-    ) -> int:
-        """Inserta un registro de autorización en runtime_execution_authorizations y devuelve su ID."""
-        conn = self.connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO runtime_execution_authorizations
-            (plan_id, validation_id, authorization_status, authorization_level, approved_conditions, rejected_conditions, reasoning)
-            VALUES (?, ?, ?, ?, ?, ?, ?);
-            """,
-            (plan_id, validation_id, authorization_status, authorization_level, approved_conditions, rejected_conditions, reasoning)
-        )
-        conn.commit()
-        return cursor.lastrowid
-
-    def get_execution_authorization(self, authorization_id: int) -> Optional[dict]:
-        """Obtiene un registro de autorización por su ID."""
-        conn = self.connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT id, plan_id, validation_id, authorization_status, authorization_level, approved_conditions, rejected_conditions, reasoning, created_at
-            FROM runtime_execution_authorizations WHERE id = ?;
-            """,
-            (authorization_id,)
-        )
-        row = cursor.fetchone()
-        if not row:
-            return None
-        return {
-            "id": row["id"],
-            "plan_id": row["plan_id"],
-            "validation_id": row["validation_id"],
-            "authorization_status": row["authorization_status"],
-            "authorization_level": row["authorization_level"],
-            "approved_conditions": row["approved_conditions"],
-            "rejected_conditions": row["rejected_conditions"],
-            "reasoning": row["reasoning"],
-            "created_at": str(row["created_at"]),
-        }
-
-    def get_execution_authorizations(self) -> list:
-        """Obtiene todas las autorizaciones ordenadas por ID descendente."""
-        conn = self.connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT id, plan_id, validation_id, authorization_status, authorization_level, approved_conditions, rejected_conditions, reasoning, created_at
-            FROM runtime_execution_authorizations ORDER BY id DESC;
-            """
-        )
-        rows = cursor.fetchall()
-        result = []
-        for row in rows:
-            result.append({
-                "id": row["id"],
-                "plan_id": row["plan_id"],
-                "validation_id": row["validation_id"],
-                "authorization_status": row["authorization_status"],
-                "authorization_level": row["authorization_level"],
-                "approved_conditions": row["approved_conditions"],
-                "rejected_conditions": row["rejected_conditions"],
-                "reasoning": row["reasoning"],
-                "created_at": str(row["created_at"]),
-            })
-        return result
-
-    def insert_authorization_condition(
-        self,
-        authorization_id: int,
-        condition_name: str,
-        condition_status: str,
-        description: str = "",
-        severity: str = "info"
-    ) -> int:
-        """Inserta una condición de autorización en runtime_authorization_conditions y devuelve su ID."""
-        conn = self.connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO runtime_authorization_conditions
-            (authorization_id, condition_name, condition_status, description, severity)
-            VALUES (?, ?, ?, ?, ?);
-            """,
-            (authorization_id, condition_name, condition_status, description, severity)
-        )
-        conn.commit()
-        return cursor.lastrowid
-
-    def get_authorization_conditions(self, authorization_id: int) -> list:
-        """Obtiene las condiciones asociadas a un ID de autorización."""
-        conn = self.connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT id, authorization_id, condition_name, condition_status, description, severity
-            FROM runtime_authorization_conditions WHERE authorization_id = ?;
-            """,
-            (authorization_id,)
-        )
-        rows = cursor.fetchall()
-        result = []
-        for row in rows:
-            result.append({
-                "id": row["id"],
-                "authorization_id": row["authorization_id"],
-                "condition_name": row["condition_name"],
-                "condition_status": row["condition_status"],
-                "description": row["description"],
-                "severity": row["severity"],
             })
         return result
 
