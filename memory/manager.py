@@ -68,6 +68,10 @@ class MemoryManager:
             Memory(content=content, importance=check_importance, confidence=check_confidence)
         return self.db_manager.update_memory(memory_id, content, importance=importance, confidence=confidence)
 
+    def mark_reviewed(self, memory_id: int, review_status: str) -> bool:
+        """review_status: 'confirmado' | 'corregido' | 'ignorado' (Bloque 13)."""
+        return self.db_manager.mark_memory_reviewed(memory_id, review_status)
+
     def get_memory(self, memory_id: int) -> Optional[Memory]:
         """
         Recupera un recuerdo por su ID y devuelve una instancia del modelo Memory o None si no existe.

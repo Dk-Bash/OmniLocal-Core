@@ -64,6 +64,10 @@ class SourceRequest(BaseModel):
     path: str
 
 
+class GoalRequest(BaseModel):
+    content: str
+
+
 # ----------------------------------------------------------------
 # Chequeo rápido de arranque (usado por el lanzador de escritorio)
 # ----------------------------------------------------------------
@@ -210,6 +214,38 @@ def add_source(req: SourceRequest):
 def delete_source(source_id: int):
     engine.db_manager.delete_source(source_id)
     return {"deleted": True}
+
+
+# ----------------------------------------------------------------
+# Objetivos / recordatorios (Bloque 9 -- Goal & Reminder Foundation)
+# ----------------------------------------------------------------
+@app.get("/api/goals")
+def list_goals(status: Optional[str] = None):
+    if status == "pendiente":
+        goals = assistant.goal_manager.list_pending()
+    else:
+        goals = assistant.goal_manager.list_all()
+    return [g.model_dump() for g in goals]
+
+
+@app.post("/api/goals")
+def create_goal(req: GoalRequest):
+    goal_id = assistant.goal_manager.create_goal(req.content)
+    return assistant.goal_manager.get_goal(goal_id).model_dump()
+
+
+@app.post("/api/goals/{goal_id}/complete")
+def complete_goal(goal_id: int):
+    ok = assistant.goal_manager.complete_goal(goal_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Objetivo no encontrado")
+    return assistant.goal_manager.get_goal(goal_id).model_dump()
+
+
+@app.delete("/api/goals/{goal_id}")
+def delete_goal(goal_id: int):
+    ok = assistant.goal_manager.delete_goal(goal_id)
+    return {"deleted": ok}
 
 
 # ----------------------------------------------------------------

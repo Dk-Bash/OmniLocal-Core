@@ -71,7 +71,7 @@ class MemoryCandidate:
     importance: float = 0.75
 
 
-def _looks_like_question(text: str) -> bool:
+def looks_like_question(text: str) -> bool:
     stripped = text.strip()
     if stripped.endswith("?") or stripped.startswith("¿"):
         return True
@@ -88,7 +88,7 @@ def detect_by_rules(user_input: str) -> Optional[MemoryCandidate]:
     user_input = (user_input or "").strip()
     if not user_input or len(user_input) > MAX_INPUT_LENGTH_FOR_RULES:
         return None
-    if _looks_like_question(user_input):
+    if looks_like_question(user_input):
         return None
 
     for pattern, category in _RULE_PATTERNS:

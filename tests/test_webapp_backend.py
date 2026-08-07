@@ -117,3 +117,47 @@ def test_source_ingestion(client, tmp_path):
     session = client.post("/api/sessions", json={"title": "Charla"}).json()
     r = client.post(f"/api/sessions/{session['id']}/messages", json={"content": "horario del taller"})
     assert "9 a 18" in r.json()["answer"]
+
+
+def test_goal_lifecycle_via_api(client):
+    r = client.post("/api/goals", json={"content": "Comprar pan"})
+    assert r.status_code == 200
+    goal = r.json()
+    assert goal["content"] == "Comprar pan"
+    assert goal["status"] == "pendiente"
+
+    r = client.get("/api/goals", params={"status": "pendiente"})
+    assert len(r.json()) == 1
+
+    r = client.post(f"/api/goals/{goal['id']}/complete")
+    assert r.status_code == 200
+    assert r.json()["status"] == "completado"
+
+    r = client.get("/api/goals", params={"status": "pendiente"})
+    assert len(r.json()) == 0
+
+    r = client.get("/api/goals")
+    assert len(r.json()) == 1  # sigue en la lista completa
+
+
+def test_complete_nonexistent_goal_returns_404(client):
+    r = client.post("/api/goals/9999/complete")
+    assert r.status_code == 404
+
+
+def test_delete_goal_via_api(client):
+    goal = client.post("/api/goals", json={"content": "Tarea"}).json()
+    r = client.delete(f"/api/goals/{goal['id']}")
+    assert r.json()["deleted"] is True
+    assert client.get("/api/goals").json() == []
+
+
+def test_ask_creates_goal_via_chat_endpoint(client):
+    session = client.post("/api/sessions", json={"title": "Charla"}).json()
+    r = client.post(f"/api/sessions/{session['id']}/messages", json={"content": "recordame que llame al dentista"})
+    assert r.json()["source"] == "memoria_local"
+
+    r = client.get("/api/goals", params={"status": "pendiente"})
+    goals = r.json()
+    assert len(goals) == 1
+    assert "llame al dentista" in goals[0]["content"]

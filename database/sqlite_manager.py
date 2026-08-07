@@ -80,6 +80,7 @@ class SQLiteManager:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        self._migrate_chat_sessions_active_project(cursor)
 
         # 3.2 Tabla feedback (útil / no útil por respuesta, insumo para mejorar)
         cursor.execute("""
@@ -706,6 +707,7 @@ class SQLiteManager:
 
         self._migrate_conversations_session_id(cursor)
         self._migrate_memories_updated_at_confidence(cursor)
+        self._migrate_memories_review_columns(cursor)
 
         # 50. Tabla memory_embeddings (Bloque 4A -- Semantic Retrieval, aditiva)
         cursor.execute("""
@@ -738,6 +740,52 @@ class SQLiteManager:
             );
         """)
 
+        # 53. Tabla goals (Bloque 9 -- Goal & Reminder Foundation, aditiva)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS goals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                due_at TIMESTAMP,
+                status TEXT DEFAULT 'pendiente',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP
+            );
+        """)
+        self._migrate_goals_columns(cursor)
+        self._migrate_goals_updated_at(cursor)
+
+        # 54. Tabla projects (Bloque 14 -- Project Workspace Foundation, aditiva)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                path TEXT NOT NULL UNIQUE,
+                objective TEXT,
+                technologies TEXT,
+                structure_summary TEXT,
+                status_summary TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP,
+                last_indexed_at TIMESTAMP
+            );
+        """)
+
+        # 55. Tabla project_files (Bloque 15 -- Code Understanding Foundation, aditiva)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS project_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                relative_path TEXT NOT NULL,
+                language TEXT,
+                classes TEXT,
+                functions TEXT,
+                imports TEXT,
+                parse_error TEXT,
+                indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(project_id, relative_path)
+            );
+        """)
+
         self.conn.commit()
 
     def _migrate_memories_updated_at_confidence(self, cursor) -> None:
@@ -749,12 +797,179 @@ class SQLiteManager:
         if "confidence" not in columns:
             cursor.execute("ALTER TABLE memories ADD COLUMN confidence REAL DEFAULT 1.0;")
 
+    def _migrate_memories_review_columns(self, cursor) -> None:
+        """Agrega review_status y reviewed_at a memories si la tabla ya existía sin ellas (Bloque 13)."""
+        cursor.execute("PRAGMA table_info(memories);")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "review_status" not in columns:
+            cursor.execute("ALTER TABLE memories ADD COLUMN review_status TEXT;")
+        if "reviewed_at" not in columns:
+            cursor.execute("ALTER TABLE memories ADD COLUMN reviewed_at TIMESTAMP;")
+
+    def mark_memory_reviewed(self, memory_id: int, review_status: str) -> bool:
+        """review_status: 'confirmado' | 'corregido' | 'ignorado' (Bloque 13)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE memories SET review_status = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ?;",
+            (review_status, memory_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Projects (Bloque 14 -- Project Workspace Foundation)
+    # ----------------------------------------------------
+    def insert_project(
+        self,
+        name: str,
+        path: str,
+        technologies: Optional[str] = None,
+        structure_summary: Optional[str] = None,
+    ) -> int:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO projects (name, path, technologies, structure_summary, last_indexed_at) "
+            "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP);",
+            (name, path, technologies, structure_summary)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_project(self, project_id: int) -> Optional[dict]:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM projects WHERE id = ?;", (project_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_project_by_path(self, path: str) -> Optional[dict]:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM projects WHERE path = ?;", (path,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_projects(self) -> list:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM projects ORDER BY id ASC;")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def update_project(
+        self,
+        project_id: int,
+        objective: Optional[str] = None,
+        technologies: Optional[str] = None,
+        structure_summary: Optional[str] = None,
+        status_summary: Optional[str] = None,
+        reindex: bool = False,
+    ) -> bool:
+        conn = self.connect()
+        cursor = conn.cursor()
+        fields, values = [], []
+        if objective is not None:
+            fields.append("objective = ?"); values.append(objective)
+        if technologies is not None:
+            fields.append("technologies = ?"); values.append(technologies)
+        if structure_summary is not None:
+            fields.append("structure_summary = ?"); values.append(structure_summary)
+        if status_summary is not None:
+            fields.append("status_summary = ?"); values.append(status_summary)
+        if reindex:
+            fields.append("last_indexed_at = CURRENT_TIMESTAMP")
+        if not fields:
+            return False
+        fields.append("updated_at = CURRENT_TIMESTAMP")
+        values.append(project_id)
+        cursor.execute(f"UPDATE projects SET {', '.join(fields)} WHERE id = ?;", values)
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def delete_project(self, project_id: int) -> bool:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM projects WHERE id = ?;", (project_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    # ----------------------------------------------------
+    # Operaciones CRUD para Project Files (Bloque 15 -- Code Understanding Foundation)
+    # ----------------------------------------------------
+    def insert_project_file(
+        self,
+        project_id: int,
+        relative_path: str,
+        language: Optional[str],
+        classes: str,
+        functions: str,
+        imports: str,
+        parse_error: Optional[str] = None,
+    ) -> int:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO project_files (project_id, relative_path, language, classes, functions, imports, parse_error) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?);",
+            (project_id, relative_path, language, classes, functions, imports, parse_error)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_project_files(self, project_id: int) -> list:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM project_files WHERE project_id = ? ORDER BY relative_path ASC;", (project_id,))
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_project_files(self, project_id: int) -> None:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM project_files WHERE project_id = ?;", (project_id,))
+        conn.commit()
+
+    def _migrate_goals_columns(self, cursor) -> None:
+        """Agrega description/goal_type/category a goals si la tabla ya existía sin ellas (Bloque 10)."""
+        cursor.execute("PRAGMA table_info(goals);")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "description" not in columns:
+            cursor.execute("ALTER TABLE goals ADD COLUMN description TEXT;")
+        if "goal_type" not in columns:
+            cursor.execute("ALTER TABLE goals ADD COLUMN goal_type TEXT DEFAULT 'task';")
+        if "category" not in columns:
+            cursor.execute("ALTER TABLE goals ADD COLUMN category TEXT;")
+
+    def _migrate_goals_updated_at(self, cursor) -> None:
+        """Agrega updated_at a goals si la tabla ya existía sin ella (Bloque 12)."""
+        cursor.execute("PRAGMA table_info(goals);")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "updated_at" not in columns:
+            cursor.execute("ALTER TABLE goals ADD COLUMN updated_at TIMESTAMP;")
+
     def _migrate_conversations_session_id(self, cursor) -> None:
         """Agrega la columna session_id a conversations si la tabla ya existía sin ella (bases previas a la interfaz web)."""
         cursor.execute("PRAGMA table_info(conversations);")
         columns = [row[1] for row in cursor.fetchall()]
         if "session_id" not in columns:
             cursor.execute("ALTER TABLE conversations ADD COLUMN session_id INTEGER;")
+
+    def _migrate_chat_sessions_active_project(self, cursor) -> None:
+        """Agrega active_project_id a chat_sessions si la tabla ya existía sin ella (Bloque 16)."""
+        cursor.execute("PRAGMA table_info(chat_sessions);")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "active_project_id" not in columns:
+            cursor.execute("ALTER TABLE chat_sessions ADD COLUMN active_project_id INTEGER;")
+
+    def set_session_project(self, session_id: int, project_id: Optional[int]) -> bool:
+        """project_id=None limpia el proyecto activo de la sesión (Bloque 16)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE chat_sessions SET active_project_id = ? WHERE id = ?;", (project_id, session_id))
+        conn.commit()
+        return cursor.rowcount > 0
 
     # ----------------------------------------------------
     # Operaciones CRUD para Knowledge Layer (Módulo 7)
@@ -842,6 +1057,100 @@ class SQLiteManager:
         return [dict(row) for row in rows]
 
     # ----------------------------------------------------
+    # Operaciones CRUD para Goals (Bloque 9 -- Goal & Reminder Foundation)
+    # ----------------------------------------------------
+    def insert_goal(
+        self,
+        content: str,
+        due_at: Optional[str] = None,
+        goal_type: str = "task",
+        category: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> int:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO goals (content, due_at, status, goal_type, category, description) "
+            "VALUES (?, ?, 'pendiente', ?, ?, ?);",
+            (content, due_at, goal_type, category, description)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def update_goal(
+        self,
+        goal_id: int,
+        content: Optional[str] = None,
+        due_at: Optional[str] = None,
+    ) -> bool:
+        """Actualiza el contenido y/o la fecha de un objetivo existente (Bloque 10). Deja rastro en updated_at (Bloque 12)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        if content is not None and due_at is not None:
+            cursor.execute(
+                "UPDATE goals SET content = ?, due_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
+                (content, due_at, goal_id)
+            )
+        elif content is not None:
+            cursor.execute(
+                "UPDATE goals SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
+                (content, goal_id)
+            )
+        elif due_at is not None:
+            cursor.execute(
+                "UPDATE goals SET due_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
+                (due_at, goal_id)
+            )
+        else:
+            return False
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def cancel_goal(self, goal_id: int) -> bool:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE goals SET status = 'cancelado', completed_at = CURRENT_TIMESTAMP WHERE id = ?;",
+            (goal_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def get_goal(self, goal_id: int) -> Optional[dict]:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM goals WHERE id = ?;", (goal_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_goals(self, status: Optional[str] = None) -> list:
+        conn = self.connect()
+        cursor = conn.cursor()
+        if status is not None:
+            cursor.execute("SELECT * FROM goals WHERE status = ? ORDER BY id ASC;", (status,))
+        else:
+            cursor.execute("SELECT * FROM goals ORDER BY id ASC;")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def complete_goal(self, goal_id: int) -> bool:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE goals SET status = 'completado', completed_at = CURRENT_TIMESTAMP WHERE id = ?;",
+            (goal_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def delete_goal(self, goal_id: int) -> bool:
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM goals WHERE id = ?;", (goal_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    # ----------------------------------------------------
     # Operaciones para Adaptive Memory Consolidation (Bloque 6)
     # ----------------------------------------------------
     def update_memory(
@@ -913,6 +1222,28 @@ class SQLiteManager:
         )
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
+
+    # ----------------------------------------------------
+    # Agregaciones para Knowledge Observability (Bloque 12)
+    # ----------------------------------------------------
+    def get_memory_usage_summary(self) -> dict:
+        """Por memoria: cuántas veces fue relevante en una conversación y cuándo fue la última vez."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT memory_id, COUNT(*) as usage_count, MAX(created_at) as last_used_at "
+            "FROM conversation_memory_usage GROUP BY memory_id;"
+        )
+        rows = cursor.fetchall()
+        return {row["memory_id"]: {"usage_count": row["usage_count"], "last_used_at": row["last_used_at"]} for row in rows}
+
+    def get_memory_change_counts(self) -> dict:
+        """Por memoria: cuántas veces cambió su contenido (Bloque 6, memory_history)."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT memory_id, COUNT(*) as change_count FROM memory_history GROUP BY memory_id;")
+        rows = cursor.fetchall()
+        return {row["memory_id"]: row["change_count"] for row in rows}
 
     def search_knowledge_nodes(self, query: str) -> list:
         """Busca nodos de conocimiento cuyo nombre, descripción o tipo coincidan con la consulta (LIKE)."""

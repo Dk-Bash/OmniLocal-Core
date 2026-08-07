@@ -39,7 +39,7 @@ COLLECTION_CATEGORIES = {"proyecto", "preferencia", "otro"}
 NEAR_DUPLICATE_MIN_SIMILARITY = 0.9
 
 
-def _extract_category(content: str) -> Optional[str]:
+def extract_category(content: str) -> Optional[str]:
     """Extrae la categoría de un contenido tipo 'Categoria: valor'. None si no matchea el formato."""
     if ":" not in content:
         return None
@@ -93,7 +93,7 @@ def consolidate_fact(engine, candidate: MemoryCandidate, ollama=None) -> int:
     algo existente, se deduplica, o se guarda como fila nueva -- según la
     categoría. Devuelve el `memory_id` resultante (nuevo o existente).
     """
-    category = _extract_category(candidate.content)
+    category = extract_category(candidate.content)
 
     if category is None:
         # No matchea el formato "Categoria: valor" esperado -- guardar tal

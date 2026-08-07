@@ -102,6 +102,14 @@ class Memory(BaseModel):
     determinísticas; queda la puerta abierta para que feedback futuro la
     ajuste sin tocar el ranking). `updated_at` distingue "cuándo se creó"
     de "cuándo se confirmó/corrigió por última vez".
+
+    Bloque 13 (Assisted Knowledge Review): `review_status` registra si
+    un candidato a revisión (ver local_ai/knowledge_observability.py) ya
+    fue atendido por el usuario -- `None` (nunca revisado),
+    `"confirmado"`, `"corregido"`, `"ignorado"`. Nota conocida: un
+    "ignorado" no expira todavía -- queda oculto para siempre hasta que
+    algo más lo cambie; es una limitación documentada a propósito, no un
+    olvido, para un bloque futuro si hace falta.
     """
     id: Optional[int] = None
     content: str
@@ -110,6 +118,8 @@ class Memory(BaseModel):
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: Optional[datetime] = None
+    review_status: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
 
     @field_validator("importance")
     def validate_importance(cls, value: float) -> float:
